@@ -3,7 +3,7 @@
 > [!CAUTION]
 > This package is in active development, and may make breaking changes before an initial release.
 
-HTTP recording, playback, and stubbing for Swift, 
+HTTP recording, playback, and stubbing for Swift,
 built around **HAR (HTTP Archive)** fixtures and **Swift Testing** traits.
 
 ## Requirements
@@ -13,9 +13,9 @@ built around **HAR (HTTP Archive)** fixtures and **Swift Testing** traits.
 
 ## Installation
 
-### Swift Package Manager
+### Swift Package Manager (Swift Package Manager)
 
-Add the following to your `Package.swift` file:
+Add to your `Package.swift`:
 
 ```swift
 dependencies: [
@@ -23,20 +23,29 @@ dependencies: [
 ]
 ```
 
-Then add the dependency to your target:
+Then add `Replay` to your **test target** dependencies:
 
 ```swift
-.target(
-    name: "YourTestTarget",
-    dependencies: [.product(name: "Replay", package: "Replay")]
+.testTarget(
+    name: "YourTests",
+    dependencies: [
+        .product(name: "Replay", package: "Replay")
+    ]
 )
 ```
 
-## Quick Start
+### Xcode
 
-Add Replay as a dependency, then annotate your tests:
+1. Add the package: **File → Add Packages…**
+2. Add **Replay** to your **test target**.
+
+If you want to ship HAR files in your test bundle, 
+ensure they’re included as test resources (see the tutorial below).
+
+## Quick start
 
 ```swift
+import Foundation
 import Testing
 import Replay
 
@@ -46,163 +55,212 @@ struct User: Codable {
     let email: String
 }
 
-@Suite(.serialized) // recommended when tests share global HTTP mocking state
+@Suite(.serialized, .playbackIsolated(replaysFrom: Bundle.module))
 struct MyAPITests {
-    @Test(.replay("fetchUser"))
+    @Test(.replay("fetchUser", matching: .method, .path))
     func fetchUser() async throws {
-        // Replay intercepts requests globally, including URLSession.shared.
-        // Your production code can stay unchanged.
-        // Your tests don't make network requests unless you explicitly enable them.
-        let (data, _) = try await URLSession.shared.data(from: URL(string: "https://api.example.com/users/42")!)
+        let (data, _) = try await URLSession.shared.data(
+            from: URL(string: "https://api.example.com/users/42")!
+        )
         let user = try JSONDecoder().decode(User.self, from: data)
         #expect(user.id == 42)
     }
 }
 ```
 
-## Design Philosophy
-
-Recent additions to Swift 6 — 
-package plugins, Swift Testing traits, test attachments, and strict concurrency — 
-_finally_ make it possible to build a truly great HTTP recording library.
-
-Replay combines these capabilities into a cohesive experience: 
-convenient HTTP capture with package plugin,
-seamless test integration via traits, 
-and rich debugging through attachments.
-
-### Why explicit recording?
-
-Traditional VCR-style libraries 
-(like Ruby's [VCR](https://github.com/vcr/vcr) or Python's [VCR.py](https://github.com/kevin1024/vcrpy)) 
-record automatically on first run, then replay thereafter. 
-
-However, this convenience can become a liability:
-
-- **Silent recording of wrong responses** — A misconfigured test might record an error response and replay it forever
-- **Accidental network calls in CI** — Tests that should use fixtures might hit live APIs
-- **Stale fixtures go unnoticed** — No signal that recorded data is months old
-
-Replay takes a different approach: 
-**tests fail explicitly when archives are missing**, 
-with clear instructions on how to record. 
-This makes fixture creation a deliberate action, 
-preventing accidental recordings 
-and ensuring CI environments never make network calls.
-
-### Why HAR format?
-
-[HAR (HTTP Archive)](http://www.softwareishard.com/blog/har-12-spec/) 
-is the industry standard for HTTP traffic capture, 
-supported by every major browser's developer tools, 
-Charles Proxy, Postman, and most debugging tools. 
-
-Using HAR means:
-
-- **Interoperability** — Import/export captures from any browser or proxy tool
-- **Human-readable** — JSON format is easy to inspect and edit
-- **Complete fidelity** — Headers, cookies, timing, and content are all preserved
-- **Ecosystem support** — Tools like [HAR Analyzer](https://toolbox.googleapps.com/apps/har_analyzer/) for visualization
-
-### How `URLProtocol` works
-
-Replay intercepts HTTP requests using `URLProtocol`, 
-which operates at the Foundation networking layer. 
-
-When a test runs with `.replay`:
-
-1. Replay registers a custom `URLProtocol` globally
-2. All `URLSession` requests (including `URLSession.shared`) are intercepted
-3. Matching requests serve responses from the HAR archive
-4. Unmatched requests fail (or record, if enabled)
-
-This means **your production code doesn't need any changes**.
-Replay works with Alamofire and any other networking library 
-built on the Foundation URL Loading System.
-
-### Where fixtures live
-
-`ReplayTrait` looks for `Replays/<name>.har` in the test bundle by default.
-
-In this package's own tests,
-fixtures are stored at `Tests/ReplayTests/Replays/*.har` 
-and copied into the test bundle via Swift Package Manager resources.
-
-If you want to load fixtures from a specific bundle or directory, 
-use the helper trait:
+`Bundle.module` is a Swift Package Manager feature.
+In an Xcode test target you typically point Replay at your test bundle’s resources:
 
 ```swift
-@Suite(.playbackIsolated(replaysFrom: Bundle.module))
-struct MyAPITests { /* ... */ }
+import Foundation
+import Testing
+import Replay
+
+private final class TestBundleToken {}
+
+@Suite(
+    .serialized,
+    .playbackIsolated(
+        replaysRootURL: Bundle(for: TestBundleToken.self)
+            .resourceURL?
+            .appendingPathComponent("Replays")
+    )
+)
+struct MyAPITests {
+    @Test(.replay("fetchUser", matching: .method, .path))
+    func fetchUser() async throws {
+        let (data, _) = try await URLSession.shared.data(
+            from: URL(string: "https://api.example.com/users/42")!
+        )
+        _ = data
+    }
+}
 ```
 
-You can also configure `ReplayTrait` directly with `rootURL`
-to specify a absolute or relative URL where `*.har` files can be found.
+## Getting STarted
 
-## Recording fixtures (explicit)
+Let's walk through a simple end-to-end setup.
 
-Replay only records when recording is enabled:
+### 1) Make sure your API client can accept a session (optional but recommended)
+
+Replay can intercept `URLSession.shared` globally, 
+so you *can* skip dependency injection.
+But accepting a session makes it easy to opt into `.test` scope later 
+(and it’s generally good design).
+
+```swift
+import Foundation
+
+struct User: Codable {
+    let id: Int
+    let name: String
+    let email: String
+}
+
+struct ExampleAPIClient {
+    let baseURL: URL
+    let session: URLSession
+
+    init(
+        baseURL: URL = URL(string: "https://api.example.com")!,
+        session: URLSession = .shared
+    ) {
+        self.baseURL = baseURL
+        self.session = session
+    }
+
+    func fetchUser(id: Int) async throws -> User {
+        let url = baseURL.appendingPathComponent("users/\(id)")
+        let (data, _) = try await session.data(from: url)
+        return try JSONDecoder().decode(User.self, from: data)
+    }
+}
+```
+
+### 2) Add a `Replays/` folder to your test target
+
+Replay loads archives named `Replays/<name>.har`.
+
+#### Swift Package Manager: copy fixtures into the test bundle
+
+Create:
+
+```
+Tests/YourTests/Replays/
+```
+
+Then in `Package.swift`, add:
+
+```swift
+.testTarget(
+    name: "YourTests",
+    dependencies: [
+        .product(name: "Replay", package: "Replay")
+    ],
+    resources: [
+        .copy("Replays")
+    ]
+)
+```
+
+#### Xcode: include fixtures as test resources
+
+Add your `Replays/` folder to the test target and ensure it’s included in the test bundle resources.
+
+If you want Replay to load fixtures from your test bundle resources, you’ll also want to apply:
+
+```swift
+private final class TestBundleToken {}
+
+@Suite(
+    .playbackIsolated(
+        replaysRootURL: Bundle(for: TestBundleToken.self)
+            .resourceURL?
+            .appendingPathComponent("Replays")
+    )
+)
+struct YourSuite { /* ... */ }
+```
+
+### 3) Write a test using `.replay("…")`
+
+```swift
+import Foundation
+import Testing
+import Replay
+
+struct User: Codable {
+    let id: Int
+    let name: String
+    let email: String
+}
+
+@Suite(.serialized, .playbackIsolated(replaysFrom: Bundle.module))
+struct ExampleAPITests {
+    @Test(.replay("fetchUser", matching: .method, .path))
+    func fetchUser() async throws {
+        let client = ExampleAPIClient()
+        let user = try await client.fetchUser(id: 42)
+
+        #expect(user.id == 42)
+    }
+}
+```
+
+### 4) Run tests (playback-only by default)
+
+The first run should fail if `Replays/fetchUser.har` doesn’t exist yet.
+That’s expected — Replay is designed to prevent accidental “record-on-first-run”.
 
 ```bash
-# Record everything in the current test run
-REPLAY_RECORD=1 swift test
-
-# Record a single test by name
-REPLAY_RECORD=1 swift test --filter fetchUser
-
-# Alternative: enable via custom argument (Swift Testing 6.1+)
-swift test --enable-replay-recording
-swift test --filter fetchUser --enable-replay-recording
+swift test
 ```
 
-If a fixture is missing and recording is *not* enabled, the test fails with instructions on how to record.
+### 5) Record intentionally
 
-## Creating HAR files from browser sessions
+Enable recording for a single test (recommended), or an entire suite:
 
-Sometimes it's easier to capture HTTP traffic using your browser's developer tools rather than recording through tests. All major browsers can export network activity as HAR files.
+```bash
+# Record one test
+REPLAY_RECORD=1 swift test --filter ExampleAPITests.fetchUser
+
+# Or: enable via custom argument (Swift Testing 6.1+)
+swift test --filter ExampleAPITests.fetchUser --enable-replay-recording
+```
+
+This will create `Replays/fetchUser.har`.
+
+### 6) Re-run (back to playback-only)
+
+```bash
+swift test
+```
+
+### 7) Commit fixtures safely
 
 > [!WARNING]
-> HAR files may contain sensitive data including 
-> cookies, authentication tokens, passwords, and personal information. 
-> Always review and redact sensitive data before committing HAR files to version control.
+> HAR files may contain sensitive data (cookies, auth headers, tokens, PII).
+> Always review/redact before committing to source control.
 
-### Safari
+Replay can redact while recording (recommended) or you can filter an existing HAR file using the plugin (see Tooling).
 
-1. Enable the Develop menu: **Safari → Settings → Advanced → Show features for web developers**
-2. Open Developer Tools: **Develop → Show Web Inspector** (or <kbd>⌥⌘I</kbd>)
-3. Select the **Network** tab
-4. Navigate to the page or trigger the API calls you want to capture
-5. Right-click in the network list and choose **Export HAR**
+## Common patterns and recipes
 
-### Chrome
+### Matching strategy (make fixtures stable)
 
-1. Open Developer Tools: **View → Developer → Developer Tools** (or <kbd>⌥⌘I</kbd>)
-2. Select the **Network** tab
-3. Ensure recording is active (red circle in top-left)
-4. Optionally enable **Preserve log** to keep requests across page loads
-5. Navigate to the page or trigger the API calls you want to capture
-6. Click the **↓** (download) button and choose **Save all as HAR with content**
+The default matchers are **method + full URL** (including query).
+That’s great for fully deterministic endpoints, 
+but many APIs have volatile query items 
+(pagination cursors, timestamps, cache-busters).
 
-### Firefox
+A very common stable setup is **method + path**:
 
-1. Open Developer Tools: **Tools → Browser Tools → Web Developer Tools** (or <kbd>⌥⌘I</kbd>)
-2. Select the **Network** tab
-3. Optionally enable **Persist Logs** to keep requests across page loads
-4. Navigate to the page or trigger the API calls you want to capture
-5. Right-click in the network list and choose **Save All As HAR**
+```swift
+@Test(.replay("fetchUser", matching: .method, .path))
+func fetchUser() async throws { /* ... */ }
+```
 
-### Edge
-
-1. Open Developer Tools: **Settings → More Tools → Developer Tools** (or <kbd>F12</kbd>)
-2. Select the **Network** tab
-3. Ensure recording is active and optionally enable **Preserve log**
-4. Navigate to the page or trigger the API calls you want to capture
-5. Click the **↓** (download) button and choose **Save all as HAR with content**
-
-## Matching
-
-Replay decides which HAR entry to serve using an array of `Matcher` values:
-
+Available matchers:
 - `.method`
 - `.url` (full absolute URL including query)
 - `.host`
@@ -212,74 +270,30 @@ Replay decides which HAR entry to serve using an array of `Matcher` values:
 - `.body`
 - `.custom((URLRequest, URLRequest) -> Bool)`
 
-Default matching is **method + full URL** (`[Matcher].default`).
+### Filtering (redacting secrets while recording)
 
-## Filtering (redacting secrets)
-
-Filters run when recording.
-
-- `Filter.headers(removing:replacement:)`
-- `Filter.queryParameters(removing:replacement:)`
-- `Filter.body(replacing:with:)`
-- `Filter.body(decoding:transform:)`
-- `Filter.custom(...)`
-
-Example:
+Filters run during recording and are persisted into the HAR file.
 
 ```swift
 @Test(
     .replay(
         "fetchUser",
         matching: .method, .path,
-        filters: .headers(removing: ["Authorization", "Cookie"]),
-                 .queryParameters(removing: ["token", "api_key"]),
-                 .body(decoding: User.self) { user in
-                     var modified = user
-                     modified.email = "redacted@example.com"
-                     return modified
-                 }
+        filters:
+            .headers(removing: ["Authorization", "Cookie"]),
+            .queryParameters(removing: ["token", "api_key"])
     )
 )
 func fetchUser() async throws { /* ... */ }
 ```
 
-## Tooling
+Body filters:
+- `Filter.body(replacing:with:)` for simple string redaction
+- `Filter.body(decoding:transform:)` for “decode JSON, redact, re-encode”
 
-Replay includes a Swift Package Manager command plugin to help manage your HAR archives.
+### Stubbing (no HAR file)
 
-> [!NOTE]
-> You may need to pass `--allow-writing-to-package-directory` 
-> the first time you run commands that modify files (like clean or record),
-> depending on your Swift Package Manager configuration.
-
-```bash
-# Check status of archives (age, orphans, etc.)
-swift package replay status
-
-# Record specific tests (wrapper around swift test)
-swift package replay record fetchUser
-
-# Inspect a HAR file
-swift package replay inspect Tests/Replays/fetchUser.har
-
-# Validate a HAR file
-swift package replay validate Tests/Replays/fetchUser.har
-
-# Filter sensitive data from an existing HAR
-swift package replay filter input.har output.har --headers Authorization
-
-# Clean up orphaned archives
-swift package replay clean --dry-run
-swift package replay clean
-```
-
-> [!TIP]
-> `clean` is intentionally conservative — 
-> it only considers explicitly named archives referenced as `.replay("name")` in `Tests/**/*.swift`.
-
-## Stubbing (no HAR)
-
-Sometimes you want a small, explicit stub instead of recording a HAR.
+Sometimes you want a tiny explicit stub instead of a fixture file.
 
 ```swift
 import Testing
@@ -296,15 +310,144 @@ func stubbedRequest() async throws {
 }
 ```
 
-## Lower-level APIs
+### Parallel tests: use `.test` scope + `Replay.session`
 
-Replay can be used without Swift Testing:
+By default, `.replay` uses global `URLProtocol` registration and a shared store, 
+which is why `.serialized` is recommended when multiple tests use Replay.
 
-- `HAR.load(from:)` / `HAR.save(_:to:)` for reading/writing HAR logs.
-- `Playback.session(configuration:)` to create a `URLSession` that replays from a HAR.
-- `PlaybackConfiguration.Source.stubs([Stub])` for in-memory playback without a HAR file.
-- `Capture.session(configuration:)` to record traffic to a HAR file or handler.
-- `Replay.session` / `Replay.configure(_:)` for convenience when you want Replay's `URLProtocol` inserted into a session configuration.
+If you want to isolate by test/task, 
+use `scope: .test` **and** make requests through a session created by Replay:
+
+```swift
+@Suite(.playbackIsolated(replaysFrom: Bundle.module))
+struct ParallelizableAPITests {
+    @Test(.replay("fetchUser", matching: .method, .path, scope: .test))
+    func fetchUser() async throws {
+        let client = ExampleAPIClient(session: Replay.session)
+        _ = try await client.fetchUser(id: 42)
+    }
+}
+```
+
+### Using Replay without Swift Testing
+
+If you’re not using Swift Testing (or you want explicit control), use the lower-level APIs:
+- `Playback.session(configuration:)` to replay from a HAR file (or in-memory stubs)
+- `Capture.session(configuration:)` to record traffic to a HAR file (or to a handler)
+- `HAR.load(from:)` / `HAR.save(_:to:)` to read/write archives
+
+Example: replay from a file with strict matching:
+
+```swift
+let archiveURL = URL(fileURLWithPath: "Replays/fetchUser.har")
+let config = PlaybackConfiguration(source: .file(archiveURL), mode: .strict, matchers: [.method, .path])
+let session = try await Playback.session(configuration: config)
+// use `session` to make requests
+```
+
+Example: allow unknown requests to hit the network (useful while migrating to fixtures):
+
+```swift
+let config = PlaybackConfiguration(source: .file(archiveURL), mode: .passthrough, matchers: [.method, .path])
+let session = try await Playback.session(configuration: config)
+```
+
+Example: record and append new requests to an existing HAR file:
+
+```swift
+let config = PlaybackConfiguration(source: .file(archiveURL), mode: .record, matchers: [.method, .path])
+let session = try await Playback.session(configuration: config)
+```
+
+## Tooling
+
+Replay includes a Swift Package Manager command plugin to help manage HAR archives.
+
+> [!NOTE]
+> You may need `--allow-writing-to-package-directory` the first time you run commands that modify files.
+
+```bash
+# Check status of archives (age, orphans, etc.)
+swift package replay status
+
+# Record specific tests (wrapper around swift test)
+swift package replay record ExampleAPITests.fetchUser
+
+# Inspect a HAR file
+swift package replay inspect Tests/YourTests/Replays/fetchUser.har
+
+# Validate a HAR file
+swift package replay validate Tests/YourTests/Replays/fetchUser.har
+
+# Filter sensitive data from an existing HAR
+swift package replay filter input.har output.har --headers Authorization --query-params token
+
+# Clean up orphaned archives
+swift package replay clean --dry-run
+swift package replay clean
+```
+
+> [!TIP]
+> `clean` is intentionally conservative — it only considers explicitly named archives referenced as `.replay("name")` in `Tests/**/*.swift`.
+
+## Troubleshooting
+
+### “Replay Archive Missing”
+
+This is expected on first run (unless you’ve already created `Replays/<name>.har`).
+Record intentionally for the failing test:
+
+```bash
+REPLAY_RECORD=1 swift test --filter <your-test-name>
+```
+
+### “No Matching Entry in Archive”
+
+This means the test made a request that didn’t match any entry in the HAR.
+Common fixes:
+- Use a more stable matcher set (often `.method, .path` instead of full `.url`)
+- Re-record the fixture intentionally
+- Inspect the archive to see what it contains:
+
+```bash
+swift package replay inspect path/to/archive.har
+```
+
+## CI guidance
+
+- Replay only records when explicitly enabled (`REPLAY_RECORD=1` or `--enable-replay-recording`), so your CI runs stay playback-only by default.
+- Commit fixtures and keep them reviewed/redacted, just like any other test asset.
+
+## Creating HAR files from browser sessions
+
+Sometimes it’s easier to capture HTTP traffic using your browser’s developer tools rather than recording through tests.
+All major browsers can export network activity as HAR files.
+
+> [!WARNING]
+> HAR files may contain sensitive data including cookies, authentication tokens, passwords, and personal information.
+> Always review and redact sensitive data before committing HAR files to version control.
+
+### Safari
+
+1. Enable the Develop menu: **Safari → Settings → Advanced → Show features for web developers**
+2. Open Developer Tools: **Develop → Show Web Inspector** (or <kbd>⌥⌘I</kbd>)
+3. Select the **Network** tab
+4. Trigger the API calls you want to capture
+5. Right-click in the network list and choose **Export HAR**
+
+### Chrome
+
+1. Open Developer Tools: **View → Developer → Developer Tools** (or <kbd>⌥⌘I</kbd>)
+2. Select the **Network** tab
+3. Trigger the API calls you want to capture
+4. Click the **↓** (download) button and choose **Save all as HAR with content**
+
+### Firefox
+
+1. Open Developer Tools: **Tools → Browser Tools → Web Developer Tools** (or <kbd>⌥⌘I</kbd>)
+2. Select the **Network** tab
+3. Trigger the API calls you want to capture
+4. Right-click in the network list and choose **Save All As HAR**
 
 ## License
 
