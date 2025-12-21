@@ -8,7 +8,7 @@ import Foundation
 /// - Exporting traffic to HAR for use in external tools
 ///
 /// For test recording/playback, prefer `ReplayTrait` (`@Test(.replay)`) and
-/// enable recording explicitly with `REPLAY_RECORD=1` or `--enable-replay-recording`.
+/// enable recording explicitly with `--enable-replay-recording`.
 
 // MARK: - Capture Configuration
 

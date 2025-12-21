@@ -45,7 +45,7 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
 
                 Options:
                 1. Update the archive with new requests:
-                   REPLAY_RECORD=1 swift test --filter <test-name>
+                   swift test --filter <test-name> --enable-replay-recording
 
                 2. Check if request details changed (URL, method, headers)
                    and update test expectations

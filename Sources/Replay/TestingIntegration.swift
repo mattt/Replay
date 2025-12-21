@@ -8,8 +8,8 @@ import Foundation
     /// A Swift Testing trait that enables Replay for the duration of a test or suite.
     ///
     /// By default, Replay runs in playback-only mode and will fail if the archive is missing.
-    /// Recording is an explicit action, enabled via `REPLAY_RECORD=1` or the
-    /// `--enable-replay-recording` command line argument (and is always disabled in CI).
+    /// Recording is an explicit action, enabled via the `--enable-replay-recording`
+    /// command line argument.
     public struct ReplayTrait: TestTrait, SuiteTrait, TestScoping {
         private let archiveName: String?
         private let stubs: [Stub]?
@@ -69,9 +69,6 @@ import Foundation
                 let instructions = """
                     To record this test's HTTP traffic, run:
                       swift test --filter \(testName) --enable-replay-recording
-
-                    Or set environment variable:
-                      REPLAY_RECORD=1 swift test --filter \(testName)
                     """
 
                 throw ReplayError.archiveMissing(
@@ -129,9 +126,6 @@ import Foundation
                 let instructions = """
                     To record this test's HTTP traffic, run:
                       swift test --filter \(testName) --enable-replay-recording
-
-                    Or set environment variable:
-                      REPLAY_RECORD=1 swift test --filter \(testName)
                     """
 
                 throw ReplayError.archiveMissing(

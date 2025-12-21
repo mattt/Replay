@@ -8,21 +8,11 @@ public enum RecordingMode {
     /// Explicitly requested recording
     case record
 
-    /// Determine the current recording mode based on the environment and command line arguments.
+    /// The current recording mode.
     ///
-    /// - When `REPLAY_RECORD` environment variable is set
-    ///   or `--enable-replay-recording` command line argument is present,
-    ///   return `.record`.
-    /// - Otherwise, return `.playback`.
-    ///
-    /// - Returns: The recording mode to use for the current test run.
+    /// - Returns: `.record` if `--enable-replay-recording` is present in the command line arguments;
+    ///            otherwise returns `.playback`.
     public static var current: RecordingMode {
-        // Check for explicit recording flag
-        if ProcessInfo.processInfo.environment["REPLAY_RECORD"] != nil {
-            return .record
-        }
-
-        // Check command line arguments (Swift Testing 6.1+)
         if CommandLine.arguments.contains("--enable-replay-recording") {
             return .record
         }

@@ -64,7 +64,7 @@ struct ExampleAPIClient {
 ///
 /// To record new fixtures for real APIs:
 /// ```
-/// REPLAY_RECORD=1 swift test --filter ExampleAPITests
+/// swift test --filter ExampleAPITests --enable-replay-recording
 /// ```
 @Suite("Example API Tests", .serialized, .playbackIsolated(replaysFrom: Bundle.module))
 struct ExampleAPITests {
@@ -144,7 +144,7 @@ struct ReplayErrorHandlingTests {
         } catch let error as ReplayError {
             let description = error.description
             #expect(description.contains("Replay Archive Missing"))
-            #expect(description.contains("REPLAY_RECORD"))
+            #expect(description.contains("--enable-replay-recording"))
         }
     }
 
