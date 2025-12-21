@@ -415,7 +415,7 @@ struct CaptureTests {
             await CaptureStore.shared.configure(config)
             await CaptureStore.shared.store(makeTestEntry())
 
-            let entries = await Capture.getEntries()
+            let entries = await Capture.entries
             #expect(entries.count >= 1)
 
             await Capture.clear()
@@ -429,7 +429,7 @@ struct CaptureTests {
 
             await Capture.clear()
 
-            let entries = await Capture.getEntries()
+            let entries = await Capture.entries
             #expect(entries.isEmpty)
         }
     }

@@ -262,9 +262,11 @@ public enum Capture {
         return URLSession(configuration: config)
     }
 
-    /// Get captured entries (when using `.memory` destination).
-    public static func getEntries() async -> [HAR.Entry] {
-        await CaptureStore.shared.getEntries()
+    /// Captured entries (when using `.memory` destination).
+    public static var entries: [HAR.Entry] {
+        get async {
+            await CaptureStore.shared.getEntries()
+        }
     }
 
     /// Clear captured data.
