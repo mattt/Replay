@@ -8,7 +8,7 @@ built around **HAR (HTTP Archive)** fixtures and **Swift Testing** traits.
 
 ## Requirements
 
-- Swift 6.2+
+- Swift 6.1+
 - macOS 14+ / iOS 17+ / tvOS 17+ / watchOS 10+ / visionOS 1+
 
 ## Installation
