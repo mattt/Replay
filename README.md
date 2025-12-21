@@ -326,6 +326,53 @@ struct ParallelizableAPITests {
 }
 ```
 
+### Multiple replays (many fixtures)
+
+Replay supports **multiple HAR archives** by keeping many files in your `Replays/` directory 
+and selecting **one archive per test** by name.
+
+```
+Tests/YourTests/Replays/
+├── createPost.har
+├── fetchPosts.har
+└── fetchUser.har
+```
+
+```swift
+import Testing
+import Replay
+
+@Suite(.serialized, .playbackIsolated(replaysFrom: Bundle.module))
+struct ExampleAPITests {
+    @Test(.replay("fetchUser", matching: .method, .path))
+    func fetchUser() async throws { /* ... */ }
+
+    @Test(.replay("fetchPosts", matching: .method, .path))
+    func fetchPosts() async throws { /* ... */ }
+
+    @Test(.replay("createPost", matching: .method, .path))
+    func createPost() async throws { /* ... */ }
+}
+```
+
+Don’t stack multiple `.replay(...)` traits on the same test. 
+Treat Replay as **one active configuration per test scope**:
+
+```swift
+@Test(.replay("fetchUser"), .replay("fetchPosts")) // ❌ Don't do this
+func myTest() async throws { /* ... */ }
+```
+
+If you need a single test to cover multiple calls, 
+you usually have two practical options:
+
+- **Option A (recommended)**: 
+  record those calls into **one HAR file** 
+  (one archive can contain many request/response entries).
+- **Option B**: 
+  split the scenario into multiple tests, 
+  each with its own `@Test(.replay("…"))`.
+
 ### Using Replay without Swift Testing
 
 If you’re not using Swift Testing (or you want explicit control), use the lower-level APIs:
