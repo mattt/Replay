@@ -16,55 +16,9 @@ struct ReplayCommand: AsyncParsableCommand {
             Clean.self,
         ]
     )
-}
 
-// MARK: - Helpers
+    // MARK: - Inspect
 
-private func findHARFiles(in root: URL, fileManager: FileManager) -> [URL] {
-    guard
-        let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-    else { return [] }
-
-    var harFiles: [URL] = []
-    for case let url as URL in enumerator {
-        guard url.pathExtension == "har" else { continue }
-        harFiles.append(url)
-    }
-    return harFiles.sorted { $0.path < $1.path }
-}
-
-private func referencedReplayNames(in testsRoot: URL, fileManager: FileManager) -> Set<String> {
-    guard
-        let enumerator = fileManager.enumerator(
-            at: testsRoot,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        )
-    else { return [] }
-
-    var names: Set<String> = []
-    let pattern = #"\.replay\(\s*"([^"]+)""#
-    guard let regex = try? Regex(pattern, as: (Substring, Substring).self) else { return [] }
-
-    for case let url as URL in enumerator {
-        guard url.pathExtension == "swift" else { continue }
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
-
-        for match in contents.matches(of: regex) {
-            names.insert(String(match.output.1))
-        }
-    }
-
-    return names
-}
-
-// MARK: - Inspect
-
-extension ReplayCommand {
     struct Inspect: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Inspect a HAR file"
@@ -91,11 +45,9 @@ extension ReplayCommand {
             }
         }
     }
-}
 
-// MARK: - Validate
+    // MARK: - Validate
 
-extension ReplayCommand {
     struct Validate: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Validate a HAR file"
@@ -111,11 +63,9 @@ extension ReplayCommand {
             print("✓ Valid HAR archive")
         }
     }
-}
 
-// MARK: - Filter
+    // MARK: - Filter
 
-extension ReplayCommand {
     struct FilterCommand: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "filter",
@@ -160,11 +110,9 @@ extension ReplayCommand {
             print("✓ Filtered archive saved to \(output)")
         }
     }
-}
 
-// MARK: - Status
+    // MARK: - Status Command
 
-extension ReplayCommand {
     struct Status: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Show status of replay archives"
@@ -307,11 +255,9 @@ extension ReplayCommand {
             return map
         }
     }
-}
 
-// MARK: - Clean
+    // MARK: - Clean
 
-extension ReplayCommand {
     struct Clean: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Delete orphaned replay archives"
@@ -368,11 +314,9 @@ extension ReplayCommand {
             print("Deleted \(deleted) orphaned archive(s).")
         }
     }
-}
 
-// MARK: - Record
+    // MARK: - Record
 
-extension ReplayCommand {
     struct Record: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Record HTTP traffic for specific tests"
@@ -424,4 +368,48 @@ extension ReplayCommand {
             }
         }
     }
+}
+
+// MARK: - Helpers
+
+private func findHARFiles(in root: URL, fileManager: FileManager) -> [URL] {
+    guard
+        let enumerator = fileManager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+    else { return [] }
+
+    var harFiles: [URL] = []
+    for case let url as URL in enumerator {
+        guard url.pathExtension == "har" else { continue }
+        harFiles.append(url)
+    }
+    return harFiles.sorted { $0.path < $1.path }
+}
+
+private func referencedReplayNames(in testsRoot: URL, fileManager: FileManager) -> Set<String> {
+    guard
+        let enumerator = fileManager.enumerator(
+            at: testsRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+    else { return [] }
+
+    var names: Set<String> = []
+    let pattern = #"\.replay\(\s*"([^"]+)""#
+    guard let regex = try? Regex(pattern, as: (Substring, Substring).self) else { return [] }
+
+    for case let url as URL in enumerator {
+        guard url.pathExtension == "swift" else { continue }
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
+
+        for match in contents.matches(of: regex) {
+            names.insert(String(match.output.1))
+        }
+    }
+
+    return names
 }
