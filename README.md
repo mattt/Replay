@@ -222,7 +222,7 @@ Enable recording for a single test (recommended), or an entire suite:
 
 ```bash
 # Record one test
-env REPLAY_MODE=record swift test --filter ExampleAPITests.fetchUser
+REPLAY_MODE=record swift test --filter ExampleAPITests.fetchUser
 ```
 
 This will create `Replays/fetchUser.har`.
@@ -233,7 +233,7 @@ If you want to run tests against a real (production/staging) API without touchin
 keep your `.replay("…")` traits in place and pass:
 
 ```bash
-env REPLAY_MODE=live swift test --filter ExampleAPITests.fetchUser
+REPLAY_MODE=live swift test --filter ExampleAPITests.fetchUser
 ```
 
 - **No fixture required**: missing `Replays/*.har` won’t fail the test.
@@ -454,7 +454,7 @@ This is expected on first run (unless you’ve already created `Replays/<name>.h
 Record intentionally for the failing test:
 
 ```bash
-env REPLAY_MODE=record swift test --filter <your-test-name>
+REPLAY_MODE=record swift test --filter <your-test-name>
 ```
 
 ### “No Matching Entry in Archive”
