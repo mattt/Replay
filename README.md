@@ -266,7 +266,7 @@ but many APIs have volatile query items
 A very common stable setup is **method + path**:
 
 ```swift
-@Test(.replay("fetchUser", matching: .method, .path))
+@Test(.replay("fetchUser", matching: [.method, .path]))
 func fetchUser() async throws { /* ... */ }
 ```
 
@@ -288,10 +288,11 @@ Filters run during recording and are persisted into the HAR file.
 @Test(
     .replay(
         "fetchUser",
-        matching: .method, .path,
-        filters:
+        matching: [.method, .path],
+        filters: [
             .headers(removing: ["Authorization", "Cookie"]),
             .queryParameters(removing: ["token", "api_key"])
+        ]
     )
 )
 func fetchUser() async throws { /* ... */ }
@@ -311,7 +312,7 @@ import Replay
 
 @Test(
     .replay(
-        stubs: Stub(URL(string: "https://example.com/hello")!, status: 200, body: "OK")
+        stubs: [Stub(URL(string: "https://example.com/hello")!, status: 200, body: "OK")]
     )
 )
 func stubbedRequest() async throws {
@@ -331,7 +332,7 @@ use `scope: .test` **and** make requests through a session created by Replay:
 ```swift
 @Suite(.playbackIsolated(replaysFrom: Bundle.module))
 struct ParallelizableAPITests {
-    @Test(.replay("fetchUser", matching: .method, .path, scope: .test))
+    @Test(.replay("fetchUser", matching: [.method, .path], scope: .test))
     func fetchUser() async throws {
         let client = ExampleAPIClient(session: Replay.session)
         _ = try await client.fetchUser(id: 42)
@@ -357,13 +358,13 @@ import Replay
 
 @Suite(.serialized, .playbackIsolated(replaysFrom: Bundle.module))
 struct ExampleAPITests {
-    @Test(.replay("fetchUser", matching: .method, .path))
+    @Test(.replay("fetchUser", matching: [.method, .path]))
     func fetchUser() async throws { /* ... */ }
 
-    @Test(.replay("fetchPosts", matching: .method, .path))
+    @Test(.replay("fetchPosts", matching: [.method, .path]))
     func fetchPosts() async throws { /* ... */ }
 
-    @Test(.replay("createPost", matching: .method, .path))
+    @Test(.replay("createPost", matching: [.method, .path]))
     func createPost() async throws { /* ... */ }
 }
 ```

@@ -72,7 +72,7 @@ struct ExampleAPITests {
     /// Test fetching a single user.
     ///
     /// Uses: `Replays/fetchUser.har`
-    @Test(.replay("fetchUser", matching: .method, .path))
+    @Test(.replay("fetchUser", matching: [.method, .path]))
     func fetchUser() async throws {
         let client = ExampleAPIClient()
         let user = try await client.fetchUser(id: 42)
@@ -85,7 +85,7 @@ struct ExampleAPITests {
     /// Test fetching a list of posts.
     ///
     /// Uses: `Replays/fetchPosts.har`
-    @Test(.replay("fetchPosts", matching: .method, .path))
+    @Test(.replay("fetchPosts", matching: [.method, .path]))
     func fetchPosts() async throws {
         let client = ExampleAPIClient()
         let posts = try await client.fetchPosts()
@@ -98,7 +98,7 @@ struct ExampleAPITests {
     /// Test creating a new post via POST request.
     ///
     /// Uses: `Replays/fetchPosts.har` (contains both GET and POST entries)
-    @Test(.replay("fetchPosts", matching: .method, .path))
+    @Test(.replay("fetchPosts", matching: [.method, .path]))
     func createPost() async throws {
         let client = ExampleAPIClient()
         let post = try await client.createPost(title: "New Post", authorId: 42)
@@ -112,9 +112,11 @@ struct ExampleAPITests {
     @Test(
         .replay(
             "fetchUser",
-            matching: .method, .path,
-            filters: .headers(removing: ["Authorization", "Cookie"]),
-            .queryParameters(removing: ["api_key", "token"])
+            matching: [.method, .path],
+            filters: [
+                .headers(removing: ["Authorization", "Cookie"]),
+                .queryParameters(removing: ["api_key", "token"])
+            ]
         )
     )
     func fetchUserWithFilters() async throws {

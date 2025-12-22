@@ -276,7 +276,7 @@ import Foundation
         /// Use Replay with custom matching configuration.
         public static func replay(
             _ name: String? = nil,
-            matching matchers: Matcher...
+            matching matchers: [Matcher]
         ) -> Self {
             return Self(name, matchers: matchers)
         }
@@ -284,8 +284,8 @@ import Foundation
         /// Use Replay with custom matching configuration and filters.
         public static func replay(
             _ name: String? = nil,
-            matching matchers: Matcher...,
-            filters: Filter...,
+            matching matchers: [Matcher],
+            filters: [Filter],
             directory: String = "Replays",
             rootURL: URL? = nil,
             scope: ReplayScope = .global
@@ -302,9 +302,9 @@ import Foundation
 
         /// Use Replay with in-memory stubs (no HAR file).
         public static func replay(
-            stubs: Stub...,
-            matching matchers: Matcher...,
-            filters: Filter...,
+            stubs: [Stub],
+            matching matchers: [Matcher] = .default,
+            filters: [Filter] = [],
             directory: String = "Replays",
             rootURL: URL? = nil,
             scope: ReplayScope = .global

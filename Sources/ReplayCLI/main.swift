@@ -205,7 +205,7 @@ struct ReplayCommand: AsyncParsableCommand {
             else { return [:] }
 
             // Capture occurrences like:
-            //   .replay("fetchUser", matching: .method, .path, filters: ...)
+            //   .replay("fetchUser", matching: [.method, .path], filters: ...)
             // This is best-effort parsing for CLI reporting.
             let pattern = #"\.replay\(\s*"([^"]+)"\s*,\s*matching:\s*([^\)]*)\)"#
             guard let regex = try? Regex(pattern, as: (Substring, Substring, Substring).self) else { return [:] }
@@ -235,9 +235,12 @@ struct ReplayCommand: AsyncParsableCommand {
 
                     var matchers: [String] = []
                     for part in parts {
-                        guard part.hasPrefix(".") else { continue }
+                        // Handle array syntax like `[.method, .path]`
+                        let cleanPart = part.trimmingCharacters(in: ["[", "]"])
+                        guard cleanPart.hasPrefix(".") else { continue }
+
                         // Keep the leading `.foo` portion (strip arguments like `.headers(...)`).
-                        let head = part.split(
+                        let head = cleanPart.split(
                             separator: "(", maxSplits: 1, omittingEmptySubsequences: true
                         ).first
                         if let head {
