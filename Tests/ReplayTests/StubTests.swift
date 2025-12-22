@@ -8,7 +8,7 @@ struct StubTests {
 
     @Test(
         "ReplayTrait can replay from in-memory stubs (global scope)",
-        .replay(stubs: [Stub(URL(string: "https://example.com/hello")!, body: "OK")])
+        .replay(stubs: [.get("https://example.com/hello", 200, ["Content-Type": "text/plain"], { "OK" })])
     )
     func replayFromStubs() async throws {
         let url = URL(string: "https://example.com/hello")!

@@ -73,7 +73,7 @@ struct PlaybackTests {
 
         @Test("stubs source holds Stub array")
         func stubsSource() {
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
             let source: PlaybackConfiguration.Source = .stubs(stubs)
 
             if case .stubs(let storedStubs) = source {
@@ -113,7 +113,7 @@ struct PlaybackTests {
     struct ConfigurationTests {
         @Test("initializes with source only")
         func initWithSourceOnly() {
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
             let config = PlaybackConfiguration(source: .stubs(stubs))
 
             if case .stubs = config.source {
@@ -149,7 +149,7 @@ struct PlaybackTests {
         @Test("configuration is Sendable")
         func sendable() async {
             let config = PlaybackConfiguration(
-                source: .stubs([Stub(URL(string: "https://example.com")!)]),
+                source: .stubs([.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]),
                 mode: .strict
             )
 
@@ -171,15 +171,32 @@ struct PlaybackTests {
         @Test("configure with stubs populates entries")
         func configureWithStubs() async throws {
             let store = PlaybackStore()
-            let stubs = [
-                Stub(URL(string: "https://example.com/api")!, status: 200, body: "OK"),
-                Stub(URL(string: "https://example.com/users")!, status: 201, body: "Created"),
+            let stubs: [Stub] = [
+                .get("https://example.com/api", 200, ["Content-Type": "text/plain"]) { "OK" },
+                .post("https://example.com/users", 201, ["Content-Type": "text/plain"]) { "Created" },
+                .put("https://example.com/users/1", 200, ["Content-Type": "text/plain"]) { "Updated" },
+                .delete("https://example.com/users/1", 204, ["Content-Type": "text/plain"]) { "Deleted" },
+                .patch("https://example.com/users/1", 200, ["Content-Type": "text/plain"]) { "Patched" },
+                .head("https://example.com/users/1", 200, ["Content-Type": "text/plain"]),
+                .options("https://example.com/users/1", 200, ["Content-Type": "text/plain"]),
+                .trace("https://example.com/users/1", 200, ["Content-Type": "text/plain"]),
+                .connect("https://example.com/users/1", 200, ["Content-Type": "text/plain"]),
+                Stub(
+                    .custom("SYNC"),
+                    URL(string: "https://example.com/users")!,
+                    status: 200,
+                    headers: ["Content-Type": "text/plain"],
+                    body: "Sync"
+                ),
             ]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
             let entries = await store.getAvailableEntries()
 
-            #expect(entries.count == 2)
+            #expect(entries.count == stubs.count)
+            #expect(entries[0].request.url == "https://example.com/api")
+            #expect(entries[0].response.status == 200)
+            #expect(entries[0].response.headers.contains { $0.name == "Content-Type" && $0.value == "text/plain" })
         }
 
         @Test("configure with entries populates entries")
@@ -227,7 +244,7 @@ struct PlaybackTests {
         @Test("getAvailableEntries returns configured entries")
         func getAvailableEntries() async throws {
             let store = PlaybackStore()
-            let stubs = [Stub(URL(string: "https://example.com")!, body: "Test")]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Test" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
             let entries = await store.getAvailableEntries()
@@ -240,7 +257,7 @@ struct PlaybackTests {
         func handleRequestMatching() async throws {
             let store = PlaybackStore()
             let url = URL(string: "https://example.com/test")!
-            let stubs = [Stub(url, status: 200, body: "Success")]
+            let stubs: [Stub] = [.get(url.absoluteString, 200, ["Content-Type": "text/plain"], { "Success" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
 
@@ -266,7 +283,7 @@ struct PlaybackTests {
         @Test("handleRequest throws in strict mode when no match")
         func handleRequestStrictNoMatch() async throws {
             let store = PlaybackStore()
-            let stubs = [Stub(URL(string: "https://example.com/api")!)]
+            let stubs: [Stub] = [.get("https://example.com/api", 200, ["Content-Type": "text/plain"], { "Success" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs), mode: .strict))
 
@@ -280,7 +297,7 @@ struct PlaybackTests {
         @Test("clear resets store state")
         func clearResetsState() async throws {
             let store = PlaybackStore()
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
             #expect(await store.getAvailableEntries().count == 1)
@@ -294,7 +311,8 @@ struct PlaybackTests {
             let store = PlaybackStore()
 
             try await store.configure(
-                PlaybackConfiguration(source: .stubs([Stub(URL(string: "https://first.com")!)]))
+                PlaybackConfiguration(
+                    source: .stubs([.get("https://first.com", 200, ["Content-Type": "text/plain"], { "Success" })]))
             )
             #expect(await store.getAvailableEntries().count == 1)
 
@@ -303,8 +321,8 @@ struct PlaybackTests {
             try await store.configure(
                 PlaybackConfiguration(
                     source: .stubs([
-                        Stub(URL(string: "https://second.com")!),
-                        Stub(URL(string: "https://third.com")!),
+                        .get("https://second.com", 200, ["Content-Type": "text/plain"], { "Success" }),
+                        .get("https://third.com", 200, ["Content-Type": "text/plain"], { "Success" }),
                     ])
                 )
             )
@@ -416,7 +434,7 @@ struct PlaybackTests {
     struct PlaybackEnumTests {
         @Test("session creates URLSession with playback configuration")
         func sessionCreatesURLSession() async throws {
-            let stubs = [Stub(URL(string: "https://example.com")!, body: "Stubbed")]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Stubbed" })]
 
             let session = try await Playback.session(
                 configuration: PlaybackConfiguration(source: .stubs(stubs))
@@ -429,7 +447,7 @@ struct PlaybackTests {
 
         @Test("session configures protocol classes")
         func sessionConfiguresProtocolClasses() async throws {
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
 
             let session = try await Playback.session(
                 configuration: PlaybackConfiguration(source: .stubs(stubs))
@@ -442,7 +460,7 @@ struct PlaybackTests {
 
         @Test("session accepts custom base configuration")
         func sessionAcceptsCustomBaseConfiguration() async throws {
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
             let baseConfig = URLSessionConfiguration.default
             baseConfig.timeoutIntervalForRequest = 999
 
@@ -459,7 +477,7 @@ struct PlaybackTests {
         @Test("clear resets store state")
         func clearResetsStoreState() async throws {
             let store = PlaybackStore()
-            let stubs = [Stub(URL(string: "https://example.com")!)]
+            let stubs: [Stub] = [.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
             let entriesBefore = await store.getAvailableEntries()
@@ -503,8 +521,11 @@ struct PlaybackTests {
         func stubBasedStore() async throws {
             let store = PlaybackStore()
             let url = URL(string: "https://api.example.com/data")!
-            let stubs = [
-                Stub(url, status: 200, headers: ["Content-Type": "application/json"], body: "{\"success\":true}")
+            let stubs: [Stub] = [
+                .get(
+                    url.absoluteString, 200, ["Content-Type": "application/json"],
+                    { "{\"success\":true}" }
+                )
             ]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
@@ -521,7 +542,7 @@ struct PlaybackTests {
         @Test("entry-based store returns correct response")
         func entryBasedStore() async throws {
             let store = PlaybackStore()
-            let url = URL(string: "https://api.example.com/users")!
+            let url: URL = URL(string: "https://api.example.com/users")!
             let entry = makeTestEntryFor(url: url, status: 201, body: "Created")
 
             try await store.configure(PlaybackConfiguration(source: .entries([entry])))
@@ -557,9 +578,9 @@ struct PlaybackTests {
             let store = PlaybackStore()
             let url1 = URL(string: "https://api.example.com/first")!
             let url2 = URL(string: "https://api.example.com/second")!
-            let stubs = [
-                Stub(url1, body: "First"),
-                Stub(url2, body: "Second"),
+            let stubs: [Stub] = [
+                .get(url1.absoluteString, 200, ["Content-Type": "text/plain"], { "First" }),
+                .get(url2.absoluteString, 200, ["Content-Type": "text/plain"], { "Second" }),
             ]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs)))
@@ -579,7 +600,7 @@ struct PlaybackTests {
         @Test("strict mode throws for unmatched requests")
         func strictModeThrowsForUnmatched() async throws {
             let store = PlaybackStore()
-            let stubs = [Stub(URL(string: "https://expected.com")!)]
+            let stubs: [Stub] = [.get("https://expected.com", 200, ["Content-Type": "text/plain"], { "Success" })]
 
             try await store.configure(PlaybackConfiguration(source: .stubs(stubs), mode: .strict))
 

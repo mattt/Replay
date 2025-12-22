@@ -16,7 +16,7 @@ struct LocalScopeTests {
             nil,
             matchers: .default,
             directory: "Replays",
-            stubs: [Stub(url, body: "A")],
+            stubs: [Stub(.get, url, body: "A")],
             scope: .test
         )
 
@@ -24,7 +24,7 @@ struct LocalScopeTests {
             nil,
             matchers: .default,
             directory: "Replays",
-            stubs: [Stub(url, body: "B")],
+            stubs: [Stub(.get, url, body: "B")],
             scope: .test
         )
 

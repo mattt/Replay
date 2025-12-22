@@ -115,7 +115,7 @@ struct ExampleAPITests {
             matching: [.method, .path],
             filters: [
                 .headers(removing: ["Authorization", "Cookie"]),
-                .queryParameters(removing: ["api_key", "token"])
+                .queryParameters(removing: ["api_key", "token"]),
             ]
         )
     )
