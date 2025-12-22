@@ -86,7 +86,7 @@ import Foundation
             let playbackMode: PlaybackConfiguration.Mode
             let source: PlaybackConfiguration.Source
 
-            if stubs == nil, mode == .live {
+            if mode == .live {
                 // Live mode: ignore fixtures entirely, pass through to network, and do not record.
                 playbackMode = .passthrough
                 source = .entries([])
@@ -156,7 +156,7 @@ import Foundation
             let playbackMode: PlaybackConfiguration.Mode
             let source: PlaybackConfiguration.Source
 
-            if stubs == nil, mode == .live {
+            if mode == .live {
                 playbackMode = .passthrough
                 source = .entries([])
             } else {
