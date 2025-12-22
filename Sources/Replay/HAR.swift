@@ -25,12 +25,12 @@ public enum HAR {
 
         /// Name and version info of the used browser.
         ///
-        /// Optional. May be omitted if not applicable.
+        /// May be omitted if not applicable.
         public var browser: Browser?
 
         /// List of all exported (tracked) pages.
         ///
-        /// Optional. Leave out this field if the application does not support grouping by pages.
+        /// Leave out this field if the application does not support grouping by pages.
         public var pages: [Page]?
 
         /// List of all exported (tracked) requests.
@@ -40,8 +40,6 @@ public enum HAR {
         public var entries: [Entry]
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -73,8 +71,6 @@ public enum HAR {
         public var version: String
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -102,8 +98,6 @@ public enum HAR {
     /// the pages array is empty and individual requests don't have a parent page.
     public struct Page: Hashable, Codable, Sendable {
         /// Date and time stamp for the beginning of the page load.
-        ///
-        /// Format: ISO 8601 (YYYY-MM-DDThh:mm:ss.sTZD, e.g. 2009-07-24T19:20:30.45+01:00).
         public var startedDateTime: Date
 
         /// Unique identifier of a page within the log.
@@ -118,8 +112,6 @@ public enum HAR {
         public var pageTimings: PageTimings
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -138,7 +130,8 @@ public enum HAR {
 
         /// Timings for various events (states) fired during the page load.
         ///
-        /// All times are specified in milliseconds. If a time info is not available,
+        /// All times are specified in milliseconds.
+        /// If a time info is not available,
         /// the appropriate field is set to -1.
         public struct PageTimings: Hashable, Codable, Sendable {
             /// Content of the page loaded.
@@ -157,7 +150,6 @@ public enum HAR {
 
             /// A comment provided by the user or the application.
             ///
-            /// Optional. New in HAR 1.2.
             public var comment: String?
 
             public init(
@@ -196,16 +188,12 @@ public enum HAR {
         public var response: Response
 
         /// Info about cache usage.
-        ///
-        /// Optional.
         public var cache: Cache?
 
         /// Detailed timing info about request/response round trip.
         public var timings: Timings
 
         /// IP address of the server that was connected (result of DNS resolution).
-        ///
-        /// Optional. New in HAR 1.2.
         public var serverIPAddress: String?
 
         /// Unique ID of the parent TCP/IP connection.
@@ -214,13 +202,9 @@ public enum HAR {
         /// a unique identifier in cases where the port is shared for more connections.
         /// If the port isn't available for the application, any other unique connection ID
         /// can be used instead (e.g. connection index).
-        ///
-        /// Optional. New in HAR 1.2.
         public var connection: String?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -269,8 +253,6 @@ public enum HAR {
         public var queryString: [QueryParameter]
 
         /// Posted data info.
-        ///
-        /// Optional.
         public var postData: PostData?
 
         /// Total number of bytes from the start of the HTTP request message
@@ -285,8 +267,6 @@ public enum HAR {
         public var bodySize: Int
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -353,8 +333,6 @@ public enum HAR {
         public var bodySize: Int
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -392,7 +370,7 @@ public enum HAR {
 
         /// Number of bytes saved due to compression.
         ///
-        /// Optional. Leave out this field if the information is not available.
+        /// Leave out this field if the information is not available.
         public var compression: Int?
 
         /// MIME type of the response text (value of the Content-Type response header).
@@ -416,12 +394,10 @@ public enum HAR {
         /// (decompressed & unchunked), then trans-coded from its original
         /// character set into UTF-8.
         ///
-        /// New in HAR 1.2. Useful for including binary responses (e.g. images) into the HAR file.
+        /// Useful for including binary responses (e.g. images) into the HAR file.
         public var encoding: String?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -450,8 +426,6 @@ public enum HAR {
         public var value: String
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -474,36 +448,25 @@ public enum HAR {
         public var value: String
 
         /// The path pertaining to the cookie.
-        ///
-        /// Optional.
         public var path: String?
 
         /// The host of the cookie.
-        ///
-        /// Optional.
         public var domain: String?
 
         /// Cookie expiration time.
-        ///
-        /// Format: ISO 8601 (YYYY-MM-DDThh:mm:ss.sTZD, e.g. 2009-07-24T19:20:30.123+02:00).
-        /// Optional.
         public var expires: Date?
 
         /// Whether the cookie is HTTP only.
         ///
         /// Set to `true` if the cookie is HTTP only, `false` otherwise.
-        /// Optional.
         public var httpOnly: Bool?
 
         /// Whether the cookie was transmitted over SSL.
         ///
         /// `true` if the cookie was transmitted over SSL, `false` otherwise.
-        /// Optional. New in HAR 1.2.
         public var secure: Bool?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -538,8 +501,6 @@ public enum HAR {
         public var value: String
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -559,18 +520,12 @@ public enum HAR {
         public var mimeType: String
 
         /// List of posted parameters (in case of URL encoded parameters).
-        ///
-        /// Optional.
         public var params: [Param]?
 
         /// Plain text posted data.
-        ///
-        /// Optional.
         public var text: String?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -591,23 +546,15 @@ public enum HAR {
             public var name: String
 
             /// Value of the posted parameter, or content of a posted file.
-            ///
-            /// Optional.
             public var value: String?
 
             /// Name of a posted file.
-            ///
-            /// Optional.
             public var fileName: String?
 
             /// Content type of a posted file.
-            ///
-            /// Optional.
             public var contentType: String?
 
             /// A comment provided by the user or the application.
-            ///
-            /// Optional. New in HAR 1.2.
             public var comment: String?
 
             public init(
@@ -640,13 +587,11 @@ public enum HAR {
         /// DNS resolution time. The time required to resolve a host name.
         ///
         /// Use -1 if the timing does not apply to the current request.
-        /// Optional.
         public var dns: Int?
 
         /// Time required to create TCP connection.
         ///
         /// Use -1 if the timing does not apply to the current request.
-        /// Optional.
         public var connect: Int?
 
         /// Time required to send HTTP request to the server.
@@ -663,12 +608,9 @@ public enum HAR {
         /// If this field is defined, the time is also included in the `connect` field
         /// (to ensure backward compatibility with HAR 1.1).
         /// Use -1 if the timing does not apply to the current request.
-        /// Optional. New in HAR 1.2.
         public var ssl: Int?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -696,17 +638,15 @@ public enum HAR {
     public struct Cache: Hashable, Codable, Sendable {
         /// State of a cache entry before the request.
         ///
-        /// Optional. Leave out this field if the information is not available.
+        /// Leave out this field if the information is not available.
         public var beforeRequest: CacheEntry?
 
         /// State of a cache entry after the request.
         ///
-        /// Optional. Leave out this field if the information is not available.
+        /// Leave out this field if the information is not available.
         public var afterRequest: CacheEntry?
 
         /// A comment provided by the user or the application.
-        ///
-        /// Optional. New in HAR 1.2.
         public var comment: String?
 
         public init(
@@ -722,8 +662,6 @@ public enum HAR {
         /// State of a cache entry.
         public struct CacheEntry: Hashable, Codable, Sendable {
             /// Expiration time of the cache entry.
-            ///
-            /// Optional.
             public var expires: Date?
 
             /// The last time the cache entry was opened.
@@ -736,8 +674,6 @@ public enum HAR {
             public var hitCount: Int
 
             /// A comment provided by the user or the application.
-            ///
-            /// Optional. New in HAR 1.2.
             public var comment: String?
 
             public init(
@@ -769,7 +705,7 @@ extension HAR {
         return document.log
     }
 
-    /// Save HAR log to file, encoding as a standard HAR 1.2 document.
+    /// Save HAR log to file.
     public static func save(_ log: Log, to url: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
