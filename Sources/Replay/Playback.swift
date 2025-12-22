@@ -210,11 +210,25 @@ public actor PlaybackStore {
 
         switch config.mode {
         case .strict:
-            throw ReplayError.noMatchingEntry(
-                method: request.httpMethod ?? "GET",
-                url: request.url?.absoluteString ?? "unknown",
-                archivePath: archivePathDescription(for: config.source)
-            )
+            // Use different error for stubs vs HAR archives
+            if case .stubs(let stubs) = config.source {
+                let availableStubs = stubs.map { stub in
+                    let location = stub.sourceLocation.map { " (\($0.description))" } ?? ""
+                    return "  • \(stub.method.rawValue) \(stub.url.absoluteString)\(location)"
+                }.joined(separator: "\n")
+
+                throw ReplayError.noMatchingStub(
+                    method: request.httpMethod ?? "GET",
+                    url: request.url?.absoluteString ?? "unknown",
+                    availableStubs: availableStubs.isEmpty ? "  (none)" : availableStubs
+                )
+            } else {
+                throw ReplayError.noMatchingEntry(
+                    method: request.httpMethod ?? "GET",
+                    url: request.url?.absoluteString ?? "unknown",
+                    archivePath: archivePathDescription(for: config.source)
+                )
+            }
 
         case .passthrough:
             let (data, response) = try await URLSession.shared.data(for: request)

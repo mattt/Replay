@@ -1,12 +1,15 @@
 import Foundation
 
 /// Errors thrown by Replay during capture, playback, and testing.
-public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedError {
+public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedError, CustomNSError {
     /// Replay has not been configured (e.g. PlaybackStore missing configuration).
     case notConfigured
 
     /// No matching entry was found for a request in a given archive.
     case noMatchingEntry(method: String, url: String, archivePath: String)
+
+    /// No matching stub was found for a request.
+    case noMatchingStub(method: String, url: String, availableStubs: String)
 
     /// Invalid request construction or conversion.
     case invalidRequest(String)
@@ -58,6 +61,26 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
                 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                 """
 
+        case .noMatchingStub(let method, let url, let availableStubs):
+            return """
+
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                ⚠️  No Matching Stub
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                Request: \(method) \(url)
+
+                Available Stubs:
+                \(availableStubs)
+
+                This request did not match any of the provided stubs.
+
+                Options:
+                1. Check if the URL or method matches exactly.
+                2. Add a new stub for this request.
+                ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                """
+
         case .invalidRequest(let reason):
             return "Invalid request: \(reason)"
 
@@ -94,5 +117,29 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
 
     public var errorDescription: String? {
         description
+    }
+
+    // MARK: - CustomNSError
+
+    public static var errorDomain: String {
+        "Replay.ReplayError"
+    }
+
+    public var errorCode: Int {
+        switch self {
+        case .notConfigured: return 0
+        case .noMatchingEntry: return 1
+        case .noMatchingStub: return 8
+        case .invalidRequest: return 2
+        case .invalidResponse: return 3
+        case .invalidURL: return 4
+        case .invalidBase64: return 5
+        case .archiveNotFound: return 6
+        case .archiveMissing: return 7
+        }
+    }
+
+    public var errorUserInfo: [String: Any] {
+        [NSLocalizedDescriptionKey: description]
     }
 }

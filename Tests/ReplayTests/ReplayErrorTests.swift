@@ -32,6 +32,21 @@ struct ReplayErrorTests {
             #expect(error.description.contains("No Matching Entry"))
         }
 
+        @Test("noMatchingStub error")
+        func noMatchingStub() {
+            let error = ReplayError.noMatchingStub(
+                method: "POST",
+                url: "https://api.example.com/users",
+                availableStubs: "  • GET https://example.com/api\n  • POST https://example.com/login"
+            )
+
+            #expect(error.description.contains("POST"))
+            #expect(error.description.contains("https://api.example.com/users"))
+            #expect(error.description.contains("No Matching Stub"))
+            #expect(error.description.contains("Available Stubs"))
+            #expect(error.description.contains("GET https://example.com/api"))
+        }
+
         @Test("invalidRequest error")
         func invalidRequest() {
             let error = ReplayError.invalidRequest("Missing URL")
@@ -106,6 +121,8 @@ struct ReplayErrorTests {
             let errors: [ReplayError] = [
                 .notConfigured,
                 .noMatchingEntry(method: "POST", url: "https://example.com", archivePath: "/archive.har"),
+                .noMatchingStub(
+                    method: "GET", url: "https://example.com", availableStubs: "  • GET https://example.com"),
                 .invalidRequest("test reason"),
                 .invalidResponse,
                 .invalidURL("bad-url"),
@@ -133,6 +150,8 @@ struct ReplayErrorTests {
             let errors: [ReplayError] = [
                 .notConfigured,
                 .noMatchingEntry(method: "GET", url: "https://example.com", archivePath: "/archive.har"),
+                .noMatchingStub(
+                    method: "GET", url: "https://example.com", availableStubs: "  • GET https://example.com"),
                 .invalidRequest("reason"),
                 .invalidResponse,
                 .invalidURL("url"),
@@ -182,6 +201,73 @@ struct ReplayErrorTests {
             } catch {
                 Issue.record("Expected invalidURL error")
             }
+        }
+    }
+
+    // MARK: - CustomNSError
+
+    @Suite("CustomNSError")
+    struct CustomNSErrorTests {
+        @Test("errorDomain is correct")
+        func errorDomain() {
+            #expect(ReplayError.errorDomain == "Replay.ReplayError")
+        }
+
+        @Test("errorCode is unique for each case")
+        func errorCodeUniqueness() {
+            let errors: [ReplayError] = [
+                .notConfigured,
+                .noMatchingEntry(method: "GET", url: "https://example.com", archivePath: "/archive.har"),
+                .noMatchingStub(
+                    method: "GET", url: "https://example.com", availableStubs: "  • GET https://example.com"),
+                .invalidRequest("reason"),
+                .invalidResponse,
+                .invalidURL("url"),
+                .invalidBase64("data"),
+                .archiveNotFound(URL(fileURLWithPath: "/file.har")),
+                .archiveMissing(
+                    path: URL(fileURLWithPath: "/file.har"),
+                    testName: "test",
+                    instructions: "instructions"
+                ),
+            ]
+
+            let codes = Set(errors.map { $0.errorCode })
+            #expect(codes.count == errors.count)
+        }
+
+        @Test("errorUserInfo contains localized description")
+        func errorUserInfoContainsDescription() {
+            let error = ReplayError.noMatchingEntry(
+                method: "GET",
+                url: "https://api.example.com/users",
+                archivePath: "/path/to/archive.har"
+            )
+
+            let userInfo = error.errorUserInfo
+            let description = userInfo[NSLocalizedDescriptionKey] as? String
+
+            #expect(description != nil)
+            #expect(description == error.description)
+            #expect(description?.contains("No Matching Entry") == true)
+        }
+
+        @Test("bridges to NSError with proper description")
+        func bridgesToNSError() {
+            let replayError = ReplayError.noMatchingEntry(
+                method: "GET",
+                url: "https://api.example.com/users?limit=2",
+                archivePath: "/path/to/archive.har"
+            )
+
+            let nsError = replayError as NSError
+
+            #expect(nsError.domain == "Replay.ReplayError")
+            #expect(nsError.code == 1)
+            #expect(nsError.localizedDescription == replayError.description)
+            #expect(nsError.localizedDescription.contains("GET"))
+            #expect(nsError.localizedDescription.contains("https://api.example.com/users?limit=2"))
+            #expect(nsError.localizedDescription.contains("No Matching Entry"))
         }
     }
 
