@@ -60,7 +60,7 @@ import Foundation
             performing function: @Sendable () async throws -> Void
         ) async throws {
             let name = archiveName ?? generateArchiveName(for: test, testCase: testCase)
-            let archiveURL = try await getArchiveURL(name: name)
+            let archiveURL = try await getArchiveURL(name: name, test: test)
 
             let mode = RecordingMode.current
             let archiveExists = FileManager.default.fileExists(atPath: archiveURL.path)
@@ -112,15 +112,10 @@ import Foundation
                 URLProtocol.unregisterClass(PlaybackURLProtocol.self)
             }
 
-            do {
-                try await function()
+            try await function()
 
-                if mode == .record {
-                    print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
-                }
-            } catch {
-                await attachDebugInfo(test: test, archiveURL: archiveURL, error: error, store: .shared)
-                throw error
+            if mode == .record {
+                print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
         }
 
@@ -130,7 +125,7 @@ import Foundation
             performing function: @Sendable () async throws -> Void
         ) async throws {
             let name = archiveName ?? generateArchiveName(for: test, testCase: testCase)
-            let archiveURL = try await getArchiveURL(name: name)
+            let archiveURL = try await getArchiveURL(name: name, test: test)
 
             let mode = RecordingMode.current
             let archiveExists = FileManager.default.fileExists(atPath: archiveURL.path)
@@ -179,19 +174,13 @@ import Foundation
                 Task { await localStore.clear() }
             }
 
-            do {
-                _ = PlaybackStoreRegistry.shared.register(localStore)
-                try await ReplayContext.$playbackStore.withValue(localStore) {
-                    try await function()
-                }
+            _ = PlaybackStoreRegistry.shared.register(localStore)
+            try await ReplayContext.$playbackStore.withValue(localStore) {
+                try await function()
+            }
 
-                if mode == .record {
-                    print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
-                }
-            } catch {
-                // Attachments/debug info are best-effort; use the local store's entries if possible.
-                await attachDebugInfo(test: test, archiveURL: archiveURL, error: error, store: localStore)
-                throw error
+            if mode == .record {
+                print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
         }
 
@@ -205,62 +194,66 @@ import Foundation
                 .replacingOccurrences(of: ")", with: "")
         }
 
-        private func getArchiveURL(name: String) async throws -> URL {
-            let baseURL: URL
+        private func getArchiveURL(name: String, test: Test) async throws -> URL {
+            // 1. Check explicit override from IsolationTrait or defaults
             if let rootURL {
-                baseURL = rootURL
-            } else if let defaultRootURL = await ReplayTestDefaults.shared.getReplaysRootURL() {
-                baseURL = defaultRootURL
-            } else {
-                let testBundle = Bundle(for: PlaybackURLProtocol.self)
-                baseURL =
-                    testBundle.resourceURL?
-                    .appendingPathComponent(directory) ?? URL(fileURLWithPath: directory)
+                return rootURL.appendingPathComponent("\(name).har")
+            }
+            if let defaultRootURL = await ReplayTestDefaults.shared.getReplaysRootURL() {
+                return defaultRootURL.appendingPathComponent("\(name).har")
             }
 
+            // 2. Resolve via Source Location (Preferred for local development & recording)
+            if let fileID = test.sourceLocation.fileID as String? {
+                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                // Attempt to resolve fileID against common SwiftPM roots
+                let searchRoots = ["Tests", "Sources"]
+
+                for root in searchRoots {
+                    let candidateSource = cwd.appendingPathComponent(root).appendingPathComponent(fileID)
+                    if FileManager.default.fileExists(atPath: candidateSource.path) {
+                        // Found the test source file. Resolve 'Replays' directory relative to it.
+                        let archiveURL =
+                            candidateSource
+                            .deletingLastPathComponent()  // File directory
+                            .appendingPathComponent(directory)  // "Replays"
+                            .appendingPathComponent("\(name).har")
+
+                        // If recording, use this source-relative path
+                        if RecordingMode.current == .record {
+                            try? FileManager.default.createDirectory(
+                                at: archiveURL.deletingLastPathComponent(),
+                                withIntermediateDirectories: true
+                            )
+                            return archiveURL
+                        }
+
+                        // If playback, use it if it exists (faster feedback loop than Bundle copy)
+                        if FileManager.default.fileExists(atPath: archiveURL.path) {
+                            return archiveURL
+                        }
+                    }
+                }
+            }
+
+            // 3. Fallback: Search in Bundles (for CI / copied resources)
+            // We search for the directory/name.har combination in all available bundles.
+            let bundles = Bundle.allBundles + Bundle.allFrameworks
+            for bundle in bundles {
+                if let url = bundle.url(
+                    forResource: name, withExtension: "har", subdirectory: directory)
+                {
+                    return url
+                }
+            }
+
+            // 4. Fallback to CWD/directory (Old behavior, mostly for Linux or when sourceLocation is missing)
+            let cwdURL = URL(fileURLWithPath: directory)
             if RecordingMode.current == .record {
                 try? FileManager.default.createDirectory(
-                    at: baseURL, withIntermediateDirectories: true)
+                    at: cwdURL, withIntermediateDirectories: true)
             }
-
-            return baseURL.appendingPathComponent("\(name).har")
-        }
-
-        private func attachDebugInfo(
-            test: Test,
-            archiveURL: URL,
-            error: Error,
-            store: PlaybackStore
-        ) async {
-            // Attach failed request details
-            if case .noMatchingEntry(let method, let url, _) = error as? ReplayError {
-                let requestInfo = """
-                    Failed Request Details:
-
-                    Method: \(method)
-                    URL: \(url)
-                    """
-
-                Attachment.record(requestInfo, named: "failed_request.txt")
-            }
-
-            // Attach available entries from playback store
-            let entries = await store.getAvailableEntries()
-            if !entries.isEmpty {
-                let lines = entries.enumerated().map { index, entry in
-                    "\(index + 1). \(entry.request.method) \(entry.request.url)"
-                }
-
-                let summary = """
-                    Available Entries in Archive:
-
-                    \(lines.joined(separator: "\n"))
-
-                    Total: \(entries.count) entries
-                    """
-
-                Attachment.record(summary, named: "available_entries.txt")
-            }
+            return cwdURL.appendingPathComponent("\(name).har")
         }
     }
 

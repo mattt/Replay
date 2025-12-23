@@ -30,7 +30,7 @@ struct ReplayErrorTests {
             #expect(error.description.contains("https://api.example.com/users"))
             #expect(error.description.contains("/path/to/archive.har"))
             #expect(error.description.contains("No Matching Entry"))
-            
+
             #expect(error.errorDescription == "No Matching Entry")
             #expect(error.failureReason?.contains("GET") == true)
         }
@@ -48,7 +48,7 @@ struct ReplayErrorTests {
             #expect(error.description.contains("No Matching Stub"))
             #expect(error.description.contains("Available Stubs"))
             #expect(error.description.contains("GET https://example.com/api"))
-            
+
             #expect(error.errorDescription == "No Matching Stub")
             #expect(error.failureReason?.contains("POST") == true)
         }
@@ -154,14 +154,22 @@ struct ReplayErrorTests {
         @Test("errorDescription returns concise summary")
         func errorDescriptionConciseSummary() {
             #expect(ReplayError.notConfigured.errorDescription == "Replay Not Configured")
-            #expect(ReplayError.noMatchingEntry(method: "GET", url: "https://example.com", archivePath: "/archive.har").errorDescription == "No Matching Entry")
-            #expect(ReplayError.noMatchingStub(method: "GET", url: "https://example.com", availableStubs: "").errorDescription == "No Matching Stub")
+            #expect(
+                ReplayError.noMatchingEntry(method: "GET", url: "https://example.com", archivePath: "/archive.har")
+                    .errorDescription == "No Matching Entry")
+            #expect(
+                ReplayError.noMatchingStub(method: "GET", url: "https://example.com", availableStubs: "")
+                    .errorDescription == "No Matching Stub")
             #expect(ReplayError.invalidRequest("reason").errorDescription == "Invalid Request")
             #expect(ReplayError.invalidResponse.errorDescription == "Invalid Response")
             #expect(ReplayError.invalidURL("url").errorDescription == "Invalid URL")
             #expect(ReplayError.invalidBase64("data").errorDescription == "Invalid Base64")
-            #expect(ReplayError.archiveNotFound(URL(fileURLWithPath: "/file.har")).errorDescription == "Archive Not Found")
-            #expect(ReplayError.archiveMissing(path: URL(fileURLWithPath: "/file.har"), testName: "test", instructions: "instructions").errorDescription == "Archive Missing")
+            #expect(
+                ReplayError.archiveNotFound(URL(fileURLWithPath: "/file.har")).errorDescription == "Archive Not Found")
+            #expect(
+                ReplayError.archiveMissing(
+                    path: URL(fileURLWithPath: "/file.har"), testName: "test", instructions: "instructions"
+                ).errorDescription == "Archive Missing")
         }
 
         @Test("errorDescription is non-nil")
