@@ -66,6 +66,33 @@ func fetchUser() async throws {
 }
 ```
 
+Replay can also run **without** a HAR file by using in-memory stubs:
+
+```swift
+import Foundation
+import Testing
+import Replay
+
+@Test(
+    .replay(
+        stubs: [
+            .get(
+                "https://example.com/greeting",
+                200,
+                ["Content-Type": "text/plain"],
+                { "Hello, world!" }
+            )
+        ]
+    )
+)
+func fetchGreeting() async throws {
+    let (data, _) = try await URLSession.shared.data(
+        from: URL(string: "https://example.com/greeting")!
+    )
+    #expect(String(data: data, encoding: .utf8) == "Hello, world!")
+}
+```
+
 <details>
 <summary><code>fetchUser.har</code> contents</summary>
 
