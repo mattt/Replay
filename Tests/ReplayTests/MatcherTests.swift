@@ -201,13 +201,13 @@ struct MatcherTests {
             #expect(matchers.matches(request1, request2))
         }
 
-        @Test("query order matters for matching")
-        func queryOrderMatters() {
+        @Test("query order does not matter for matching")
+        func queryOrderDoesNotMatter() {
             let request1 = makeRequest(urlString: "https://example.com/path?a=1&b=2")
             let request2 = makeRequest(urlString: "https://example.com/path?b=2&a=1")
 
             let matchers: [Matcher] = [.query]
-            #expect(!matchers.matches(request1, request2))
+            #expect(matchers.matches(request1, request2))
         }
     }
 
@@ -557,6 +557,38 @@ struct MatcherTests {
             #expect(matchers.matches(request1, request2))
         }
     }
+
+    // MARK: - Fragment Matcher Tests
+
+    @Suite("Fragment Matcher")
+    struct FragmentMatcherTests {
+        @Test("matches when fragments are equal")
+        func matchesEqualFragments() {
+            let request1 = makeRequest(urlString: "https://example.com/path#frag")
+            let request2 = makeRequest(urlString: "https://different.com/other#frag")
+
+            let matchers: [Matcher] = [.fragment]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when fragments differ")
+        func doesNotMatchDifferentFragments() {
+            let request1 = makeRequest(urlString: "https://example.com/path#frag1")
+            let request2 = makeRequest(urlString: "https://example.com/path#frag2")
+
+            let matchers: [Matcher] = [.fragment]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches when both fragments are nil")
+        func matchesNilFragments() {
+            let request1 = makeRequest(urlString: "https://example.com/path")
+            let request2 = makeRequest(urlString: "https://example.com/other")
+
+            let matchers: [Matcher] = [.fragment]
+            #expect(matchers.matches(request1, request2))
+        }
+    }
 }
 
 // MARK: - Test Helpers
@@ -606,7 +638,7 @@ private extension [Matcher] {
         for matcher in self {
             switch matcher {
             case .method:
-                if request.httpMethod != candidate.httpMethod { return false }
+                if request.httpMethod?.uppercased() != candidate.httpMethod?.uppercased() { return false }
             case .url:
                 if request.url?.absoluteString != candidate.url?.absoluteString { return false }
             case .host:
@@ -617,7 +649,11 @@ private extension [Matcher] {
                 guard let url1 = request.url, let url2 = candidate.url else { return false }
                 let c1 = URLComponents(url: url1, resolvingAgainstBaseURL: true)
                 let c2 = URLComponents(url: url2, resolvingAgainstBaseURL: true)
-                if c1?.queryItems != c2?.queryItems { return false }
+                let q1 = normalizedQueryItems(c1?.queryItems)
+                let q2 = normalizedQueryItems(c2?.queryItems)
+                if q1 != q2 { return false }
+            case .fragment:
+                if request.url?.fragment != candidate.url?.fragment { return false }
             case .headers(let names):
                 for name in names {
                     if request.value(forHTTPHeaderField: name)
@@ -633,5 +669,30 @@ private extension [Matcher] {
             }
         }
         return true
+    }
+
+    private func normalizedQueryItems(_ items: [URLQueryItem]?) -> [NormalizedQueryItem] {
+        let normalized = (items ?? []).map { NormalizedQueryItem($0) }
+        return normalized.sorted()
+    }
+
+    private struct NormalizedQueryItem: Comparable {
+        let name: String
+        let value: String?
+
+        init(_ item: URLQueryItem) {
+            self.name = item.name
+            self.value = item.value
+        }
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            if lhs.name != rhs.name { return lhs.name < rhs.name }
+            switch (lhs.value, rhs.value) {
+            case (nil, nil): return false
+            case (nil, _?): return true
+            case (_?, nil): return false
+            case (let l?, let r?): return l < r
+            }
+        }
     }
 }

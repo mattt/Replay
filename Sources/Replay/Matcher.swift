@@ -5,7 +5,14 @@ public enum Matcher: Sendable {
     /// Matches HTTP method (e.g. `GET`, `POST`).
     case method
 
-    /// Matches the full absolute URL string, including scheme, host, path, and query.
+    /// Matches the full absolute URL string (`URL.absoluteString`), including scheme, port, query, and fragment.
+    ///
+    /// - Warning: This matcher is **strict** and can cause unexpected mismatches if your URLs
+    ///   contain volatile query items (pagination cursors, timestamps, cache-busters) or if query
+    ///   items are emitted in a different order.
+    ///
+    ///   If that happens, prefer composing matchers like `.method` + `.path` (+ `.query` or `.headers(...)`)
+    ///   instead of matching the entire URL string.
     case url
 
     /// Matches URL host (e.g. `api.example.com`).
@@ -15,7 +22,12 @@ public enum Matcher: Sendable {
     case path
 
     /// Matches URL query items (`URLComponents.queryItems`).
+    ///
+    /// - Important: This matcher is **not order-sensitive**. `?a=1&b=2` matches `?b=2&a=1`.
     case query
+
+    /// Matches URL fragment (`#fragment`).
+    case fragment
 
     /// Matches the values of the specified HTTP request headers.
     ///
@@ -32,7 +44,7 @@ public enum Matcher: Sendable {
     fileprivate func matches(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
         switch self {
         case .method:
-            return request.httpMethod == candidate.httpMethod
+            return request.httpMethod?.uppercased() == candidate.httpMethod?.uppercased()
 
         case .url:
             return request.url?.absoluteString == candidate.url?.absoluteString
@@ -51,7 +63,11 @@ public enum Matcher: Sendable {
 
             let components1 = URLComponents(url: url1, resolvingAgainstBaseURL: true)
             let components2 = URLComponents(url: url2, resolvingAgainstBaseURL: true)
-            return components1?.queryItems == components2?.queryItems
+            return normalizedQueryItems(components1?.queryItems)
+                == normalizedQueryItems(components2?.queryItems)
+
+        case .fragment:
+            return request.url?.fragment == candidate.url?.fragment
 
         case .headers(let names):
             for name in names {
@@ -70,6 +86,31 @@ public enum Matcher: Sendable {
             return block(request, candidate)
         }
     }
+
+    private func normalizedQueryItems(_ items: [URLQueryItem]?) -> [NormalizedQueryItem] {
+        let normalized = (items ?? []).map { NormalizedQueryItem($0) }
+        return normalized.sorted()
+    }
+
+    private struct NormalizedQueryItem: Comparable, Sendable {
+        let name: String
+        let value: String?
+
+        init(_ item: URLQueryItem) {
+            self.name = item.name
+            self.value = item.value
+        }
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            if lhs.name != rhs.name { return lhs.name < rhs.name }
+            switch (lhs.value, rhs.value) {
+            case (nil, nil): return false
+            case (nil, _?): return true
+            case (_?, nil): return false
+            case (let l?, let r?): return l < r
+            }
+        }
+    }
 }
 
 // MARK: -
@@ -77,7 +118,8 @@ public enum Matcher: Sendable {
 extension Array where Element == Matcher {
     /// Default matching strategy: HTTP method + full URL.
     ///
-    /// This is the strictest matcher set and will treat query string changes as mismatches.
+    /// This is the strictest matcher set and will treat changes in scheme, host/port, path,
+    /// query ordering, or fragment as mismatches.
     public static var `default`: [Matcher] {
         [.method, .url]
     }

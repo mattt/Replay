@@ -379,7 +379,7 @@ Available matchers:
 - `.method` (case-insensitive)
 - `.host` (string equality on `URL.host`)
 - `.path` (string equality on `URL.path`)
-- `.query` (order-sensitive `URLComponents.queryItems` equality)
+- `.query` (order-insensitive `URLComponents.queryItems` equality)
 - `.fragment` (`URL.fragment`; rarely useful for HTTP APIs)
 - `.url` (strict `URL.absoluteString` equality)
 - `.headers([String])`
@@ -405,7 +405,8 @@ Examples:
 
 Canonicalization / normalization notes:
 - `.url` is intentionally strict: scheme/port/query ordering/fragment differences will not match.
-- Query comparisons are **order-sensitive**: `?a=1&b=2` ≠ `?b=2&a=1` when using `.query` / `.url`.
+- Query comparisons are **order-insensitive** when using `.query`: `?a=1&b=2` matches `?b=2&a=1`.
+- Query comparisons are **order-sensitive** when using `.url` (because `URL.absoluteString` is order-sensitive).
 - Header matching uses `URLRequest.value(forHTTPHeaderField:)` semantics (case-insensitive names).
 
 ### Use filters to remove sensitive and unnecessary
