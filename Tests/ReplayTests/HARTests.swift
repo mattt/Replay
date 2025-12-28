@@ -1277,9 +1277,9 @@ struct HARTests {
         @Test("all types are Codable")
         func allTypesAreCodable() throws {
             let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
+            encoder.dateEncodingStrategy = .iso8601WithFractionalSeconds
             let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
+            decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
 
             let log = HAR.Log(
                 version: "1.2",
@@ -1315,7 +1315,7 @@ struct HARTests {
         @Test("encodes dates as ISO8601")
         func encodesDateAsISO8601() throws {
             let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
+            encoder.dateEncodingStrategy = .iso8601WithFractionalSeconds
 
             let entry = makeTestEntry()
             let data = try encoder.encode(entry)

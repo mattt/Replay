@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}
+    runs-on: macos-${{ matrix.macos }}
+    env:
+      DEVELOPER_DIR: "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - swift: "6.1"
+            xcode: "16.3"
+            macos: "15"
+          - swift: "6.2"
+            xcode: "26.0"
+            macos: "26"
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Swift Package Manager dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/org.swift.swiftpm
+            .build
+          key: ${{ runner.os }}-swift-${{ matrix.swift }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swift-${{ matrix.swift }}-spm-
+
+      - name: Lint
+        run: swift format lint --strict --recursive .
+
+      - name: Build
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v
