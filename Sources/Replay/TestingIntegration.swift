@@ -223,7 +223,7 @@ import Foundation
             // 2. Resolve via Source Location (Preferred for local development & recording)
             if let fileID = test.sourceLocation.fileID as String? {
                 let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                // Attempt to resolve fileID against common SwiftPM roots
+                // Attempt to resolve fileID against common Swift package roots
                 let searchRoots = ["Tests", "Sources"]
 
                 for root in searchRoots {

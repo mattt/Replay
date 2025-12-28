@@ -273,8 +273,10 @@ struct YourSuite {
 ```
 
 > [!TIP]
-> If multiple tests in the same process use Replay, add `.serialized` to the suite to avoid
-> cross-test interference through global `URLProtocol` registration (or use `scope: .test` + `Replay.session`).
+> `ReplayTrait` already isolates playback when using `scope: .global`
+> to avoid cross-test interference through global `URLProtocol` registration.
+> If you want per-test isolation (and to avoid a global lock),
+> use `scope: .test` and make requests through `Replay.session`.
 
 ### 3) Run tests (playback-only by default)
 
@@ -469,8 +471,9 @@ func fetchGreeting() async throws {
 
 ### Use `.test` scope + `Replay.session` to run tests in parallel
 
-By default, `.replay` uses global `URLProtocol` registration and a shared store,
-which is why `.serialized` is recommended when multiple tests use Replay.
+By default, `.replay` uses global `URLProtocol` registration and a shared store.
+`ReplayTrait` serializes access in `scope: .global`
+to prevent cross-test interference.
 
 If you want to isolate by test/task,
 use `scope: .test` **and** make requests through a session created by Replay:
@@ -502,7 +505,7 @@ Tests/YourTests/Replays/
 import Testing
 import Replay
 
-@Suite(.serialized, .playbackIsolated(replaysFrom: Bundle.module))
+@Suite(.playbackIsolated(replaysFrom: Bundle.module))
 struct ExampleAPITests {
     @Test(.replay("fetchUser", matching: [.method, .path]))
     func fetchUser() async throws { /* ... */ }
@@ -570,7 +573,7 @@ If you're not using Swift Testing (or you want explicit control),
 use the lower-level APIs:
 
 - `Playback.session(configuration:)` to replay from a HAR file (or in-memory stubs)
-- `Capture.session(configuration:)` to record traffic to a HAR file (or to a handler)
+- `Capture.session(configuration:baseConfiguration:)` to record traffic to a HAR file (or to a handler)
 - `HAR.load(from:)` / `HAR.save(_:to:)` to read/write archives
 
 Example: replay from a file with strict matching:
@@ -607,8 +610,12 @@ Replay includes a Swift Package Manager command plugin to help manage HAR archiv
 # Check status of archives (age, orphans, etc.)
 swift package replay status
 
-# Record specific tests (wrapper around swift test)
+# Record specific tests (runs `swift test --filter …` with `REPLAY_MODE=record`)
 swift package replay record ExampleAPITests.fetchUser
+
+# Note: The archive name and location come from your `@Test(.replay("…"))`
+# configuration (or the auto-generated name),
+# not from the `--filter` string passed to the `swift test` command.
 
 # Inspect a HAR file
 swift package replay inspect Tests/YourTests/Replays/fetchUser.har
