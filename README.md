@@ -252,7 +252,7 @@ That's expected — Replay is designed to prevent accidental “record-on-first-
 
 ```console
 swift test
-􀢄  Test fetchUserWRONG() recorded an issue at ExampleTests.swift
+❌  Test fetchUser() recorded an issue at ExampleTests.swift
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️  No Matching Entry in Archive
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -305,8 +305,7 @@ This will create `Replays/fetchUser.har`.
 
 ```console
 swift test
-􀟈  Test fetchUser() started.
-􁁛  Test fetchUser() passed after 0.003 seconds.
+✅  Test fetchUser() passed after 0.001 seconds.
 ```
 
 ### 6) Commit fixtures safely
