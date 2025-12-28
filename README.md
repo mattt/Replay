@@ -282,7 +282,7 @@ The first run should fail if `Replays/fetchUser.har` doesn't exist yet.
 That's expected — Replay is designed to prevent accidental “record-on-first-run”.
 
 ```console
-swift test
+$ swift test
 ❌  Test fetchUser() recorded an issue at ExampleTests.swift
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️  No Matching Entry in Archive
@@ -335,7 +335,7 @@ This will create `Replays/fetchUser.har`.
 ### 5) Re-run (back to playback-only)
 
 ```console
-swift test
+$ swift test
 ✅  Test fetchUser() passed after 0.001 seconds.
 ```
 
