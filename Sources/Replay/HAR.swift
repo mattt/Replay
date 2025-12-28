@@ -705,23 +705,110 @@ public enum HAR {
 
 // MARK: - HAR Reading / Writing
 
+extension JSONDecoder.DateDecodingStrategy {
+    /// Custom ISO 8601 date decoding strategy that supports fractional seconds.
+    ///
+    /// Swift 6.1's default `.iso8601` strategy doesn't handle fractional seconds.
+    /// This strategy tries parsing with fractional seconds first, then falls back
+    /// to the standard format if needed.
+    static let iso8601WithFractionalSeconds = custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let dateString = try container.decode(String.self)
+
+        // Try parsing with fractional seconds first
+        let formatterWithFractional = ISO8601DateFormatter()
+        formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFractional.date(from: dateString) {
+            return date
+        }
+
+        // Fall back to standard ISO 8601 format
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: dateString) {
+            return date
+        }
+
+        throw DecodingError.dataCorruptedError(
+            in: container,
+            debugDescription: "Expected date string to be ISO8601-formatted."
+        )
+    }
+}
+
+extension JSONEncoder.DateEncodingStrategy {
+    /// Custom ISO 8601 date encoding strategy that includes fractional seconds.
+    ///
+    /// This ensures consistency with the decoding strategy and preserves
+    /// millisecond precision in HAR files.
+    static let iso8601WithFractionalSeconds = custom { date, encoder in
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let dateString = formatter.string(from: date)
+        var container = encoder.singleValueContainer()
+        try container.encode(dateString)
+    }
+}
+
 extension HAR {
     /// Load HAR from file, returning the root `HAR.Log` structure.
+    ///
+    /// Uses a default `JSONDecoder` configured to flexibly handle
+    /// ISO 8601 dates with or without fractional seconds.
     public static func load(from url: URL) throws -> Log {
         let data = try Data(contentsOf: url)
+        return try load(from: data)
+    }
+
+    /// Load HAR from data, returning the root `HAR.Log` structure.
+    ///
+    /// Uses a default `JSONDecoder` configured to flexibly handle
+    /// ISO 8601 dates with or without fractional seconds.
+    public static func load(from data: Data) throws -> Log {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .iso8601WithFractionalSeconds
+        return try load(from: data, using: decoder)
+    }
+
+    /// Load HAR from data using a custom decoder.
+    ///
+    /// - Parameters:
+    ///   - data: The HAR data to decode.
+    ///   - decoder: The `JSONDecoder` to use for decoding.
+    /// - Returns: The decoded `HAR.Log` structure.
+    public static func load(from data: Data, using decoder: JSONDecoder) throws -> Log {
         let document = try decoder.decode(Document.self, from: data)
         return document.log
     }
 
     /// Save HAR log to file.
+    ///
+    /// Uses a default `JSONEncoder` configured to encode dates as ISO 8601
+    /// with fractional seconds and pretty-printed output.
     public static func save(_ log: Log, to url: URL) throws {
+        let data = try encode(log)
+        try data.write(to: url)
+    }
+
+    /// Encode HAR log to data.
+    ///
+    /// Uses a default `JSONEncoder` configured to encode dates as ISO 8601
+    /// with fractional seconds and pretty-printed output.
+    public static func encode(_ log: Log) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(Document(log: log))
-        try data.write(to: url)
+        encoder.dateEncodingStrategy = .iso8601WithFractionalSeconds
+        return try encode(log, using: encoder)
+    }
+
+    /// Encode HAR log to data using a custom encoder.
+    ///
+    /// - Parameters:
+    ///   - log: The `HAR.Log` to encode.
+    ///   - encoder: The `JSONEncoder` to use for encoding.
+    /// - Returns: The encoded data.
+    public static func encode(_ log: Log, using encoder: JSONEncoder) throws -> Data {
+        return try encoder.encode(Document(log: log))
     }
 
     /// Create an empty HAR log.
