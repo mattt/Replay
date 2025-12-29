@@ -1,51 +1,42 @@
 import Foundation
 
-// MARK: - Playback Configuration
+// MARK: - Playback Session Factory
 
-enum ReplayContext {
-    @TaskLocal
-    static var playbackStore: PlaybackStore?
-}
-
-enum ReplayProtocolContext {
-    static let headerName = "X-Replay-Playback-Context"
-}
-
-/// A tiny registry used to route requests to an isolated `PlaybackStore` when using `.test` scope.
+/// Playback APIs for replaying HTTP traffic from recorded sources.
 ///
-/// The store identity is carried via a private HTTP header on sessions created by `Replay.session`.
-final class PlaybackStoreRegistry: @unchecked Sendable {
-    static let shared = PlaybackStoreRegistry()
+/// Use `Playback.session(configuration:baseConfiguration:)` to create a `URLSession`
+/// that intercepts requests through `PlaybackURLProtocol`.
+public enum Playback {
+    /// Create `URLSession` configured for playback using the provided configuration.
+    public static func session(
+        configuration: PlaybackConfiguration,
+        baseConfiguration: URLSessionConfiguration = .ephemeral
+    ) async throws -> URLSession {
+        let config = baseConfiguration
+        var protocols = config.protocolClasses ?? []
+        protocols.insert(PlaybackURLProtocol.self, at: 0)
+        config.protocolClasses = protocols
 
-    private let lock = NSLock()
-    private var stores: [String: PlaybackStore] = [:]
+        // Prefer isolation: configure a dedicated store and route requests to it via header.
+        // This avoids interference when multiple playback sessions exist concurrently.
+        let store = PlaybackStore()
+        try await store.configure(configuration)
+        let key = PlaybackStoreRegistry.shared.register(store)
 
-    static func key(for store: PlaybackStore) -> String {
-        // Stable for the lifetime of the object.
-        String(UInt(bitPattern: ObjectIdentifier(store)))
+        var headers = config.httpAdditionalHeaders ?? [:]
+        headers[ReplayProtocolContext.headerName] = key
+        config.httpAdditionalHeaders = headers
+
+        return URLSession(configuration: config)
     }
 
-    func register(_ store: PlaybackStore) -> String {
-        let key = Self.key(for: store)
-        lock.lock()
-        stores[key] = store
-        lock.unlock()
-        return key
-    }
-
-    func unregister(key: String) {
-        lock.lock()
-        stores[key] = nil
-        lock.unlock()
-    }
-
-    func store(for key: String) -> PlaybackStore? {
-        lock.lock()
-        let store = stores[key]
-        lock.unlock()
-        return store
+    /// Clear playback state.
+    public static func clear() async {
+        await PlaybackStore.shared.clear()
     }
 }
+
+// MARK: - Playback Configuration
 
 /// A scope for replay playback configuration.
 ///
@@ -120,6 +111,51 @@ public struct PlaybackConfiguration: Sendable {
         self.recordMode = recordMode
         self.matchers = matchers
         self.filters = filters
+    }
+}
+
+enum ReplayContext {
+    @TaskLocal
+    static var playbackStore: PlaybackStore?
+}
+
+enum ReplayProtocolContext {
+    static let headerName = "X-Replay-Playback-Context"
+}
+
+/// A tiny registry used to route requests to an isolated `PlaybackStore` when using `.test` scope.
+///
+/// The store identity is carried via a private HTTP header on sessions created by `Replay.session`.
+final class PlaybackStoreRegistry: @unchecked Sendable {
+    static let shared = PlaybackStoreRegistry()
+
+    private let lock = NSLock()
+    private var stores: [String: PlaybackStore] = [:]
+
+    static func key(for store: PlaybackStore) -> String {
+        // Stable for the lifetime of the object.
+        String(UInt(bitPattern: ObjectIdentifier(store)))
+    }
+
+    func register(_ store: PlaybackStore) -> String {
+        let key = Self.key(for: store)
+        lock.lock()
+        stores[key] = store
+        lock.unlock()
+        return key
+    }
+
+    func unregister(key: String) {
+        lock.lock()
+        stores[key] = nil
+        lock.unlock()
+    }
+
+    func store(for key: String) -> PlaybackStore? {
+        lock.lock()
+        let store = stores[key]
+        lock.unlock()
+        return store
     }
 }
 
@@ -370,41 +406,5 @@ public actor PlaybackStore {
             startTime: Date(),
             duration: 0
         )
-    }
-}
-
-// MARK: - Playback Session Factory
-
-/// Playback APIs for replaying HTTP traffic from recorded sources.
-///
-/// Use `Playback.session(configuration:baseConfiguration:)` to create a `URLSession`
-/// that intercepts requests through `PlaybackURLProtocol`.
-public enum Playback {
-    /// Create `URLSession` configured for playback using the provided configuration.
-    public static func session(
-        configuration: PlaybackConfiguration,
-        baseConfiguration: URLSessionConfiguration = .ephemeral
-    ) async throws -> URLSession {
-        let config = baseConfiguration
-        var protocols = config.protocolClasses ?? []
-        protocols.insert(PlaybackURLProtocol.self, at: 0)
-        config.protocolClasses = protocols
-
-        // Prefer isolation: configure a dedicated store and route requests to it via header.
-        // This avoids interference when multiple playback sessions exist concurrently.
-        let store = PlaybackStore()
-        try await store.configure(configuration)
-        let key = PlaybackStoreRegistry.shared.register(store)
-
-        var headers = config.httpAdditionalHeaders ?? [:]
-        headers[ReplayProtocolContext.headerName] = key
-        config.httpAdditionalHeaders = headers
-
-        return URLSession(configuration: config)
-    }
-
-    /// Clear playback state.
-    public static func clear() async {
-        await PlaybackStore.shared.clear()
     }
 }
