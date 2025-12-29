@@ -1,14 +1,54 @@
 import Foundation
 
+// MARK: - Capture Session Factory
+
 /// The Capture API records live HTTP traffic into HAR entries.
 ///
 /// This is intentionally independent of `@Test(.replay)` so it can be used for:
 /// - Recording traffic from tooling or sample apps (outside of tests)
-/// - Custom recording workflows (e.g. streaming entries to a handler)
+/// - Custom recording workflows (for example, streaming entries to a handler)
 /// - Exporting traffic to HAR for use in external tools
 ///
 /// For test recording/playback, prefer `ReplayTrait` (`@Test(.replay)`) and
 /// enable recording explicitly with `REPLAY_RECORD_MODE=once` (or `rewrite`).
+///
+/// Use `Capture.session(configuration:baseConfiguration:)` to create a `URLSession`
+/// that records requests through `CaptureURLProtocol`.
+///
+public enum Capture {
+    /// Creates a `URLSession` configured for capturing HTTP traffic.
+    ///
+    /// - Parameters:
+    ///   - configuration: The capture configuration specifying destination,
+    ///     filters, and optional matchers.
+    ///   - baseConfiguration: The base `URLSessionConfiguration` to extend.
+    /// - Returns: A configured `URLSession` that records traffic as HAR entries.
+    public static func session(
+        configuration: CaptureConfiguration,
+        baseConfiguration: URLSessionConfiguration = .default
+    ) async -> URLSession {
+        let config = baseConfiguration
+        var protocols = config.protocolClasses ?? []
+        protocols.insert(CaptureURLProtocol.self, at: 0)
+        config.protocolClasses = protocols
+
+        await CaptureStore.shared.configure(configuration)
+
+        return URLSession(configuration: config)
+    }
+
+    /// Captured entries (when using `.memory` destination).
+    public static var entries: [HAR.Entry] {
+        get async {
+            await CaptureStore.shared.getEntries()
+        }
+    }
+
+    /// Clears the active capture configuration and any captured entries.
+    public static func clear() async {
+        await CaptureStore.shared.clear()
+    }
+}
 
 // MARK: - Capture Configuration
 
@@ -83,8 +123,8 @@ public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
             return false
         }
 
-        // If there is no configuration yet, we don't capture.
-        // The matcher, when present, is consulted asynchronously.
+        // Note: capture matching/filtering is applied later during recording
+        // (in `CaptureStore.recordEntry(...)`).
         return true
     }
 
@@ -254,46 +294,5 @@ public actor CaptureStore {
         } catch {
             print("Replay: Failed to create HAR entry: \(String(describing: error))")
         }
-    }
-}
-
-// MARK: - Capture Session Factory
-
-/// Capture APIs for recording live HTTP traffic as HAR entries.
-///
-/// Use `Capture.session(configuration:baseConfiguration:)` to create a `URLSession`
-/// that records requests through `CaptureURLProtocol`.
-public enum Capture {
-    /// Creates a `URLSession` configured for capturing HTTP traffic.
-    ///
-    /// - Parameters:
-    ///   - configuration: The capture configuration specifying destination,
-    ///     filters, and optional matchers.
-    ///   - baseConfiguration: The base `URLSessionConfiguration` to extend.
-    /// - Returns: A configured `URLSession` that records traffic as HAR entries.
-    public static func session(
-        configuration: CaptureConfiguration,
-        baseConfiguration: URLSessionConfiguration = .default
-    ) async -> URLSession {
-        let config = baseConfiguration
-        var protocols = config.protocolClasses ?? []
-        protocols.insert(CaptureURLProtocol.self, at: 0)
-        config.protocolClasses = protocols
-
-        await CaptureStore.shared.configure(configuration)
-
-        return URLSession(configuration: config)
-    }
-
-    /// Captured entries (when using `.memory` destination).
-    public static var entries: [HAR.Entry] {
-        get async {
-            await CaptureStore.shared.getEntries()
-        }
-    }
-
-    /// Clears the active capture configuration and any captured entries.
-    public static func clear() async {
-        await CaptureStore.shared.clear()
     }
 }
