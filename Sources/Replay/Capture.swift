@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 // MARK: - Capture Session Factory
 
 /// The Capture API records live HTTP traffic into HAR entries.

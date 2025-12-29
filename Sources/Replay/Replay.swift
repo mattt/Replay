@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// Namespace for URLSession-related helpers used with Replay.
 public enum Replay {
     /// Controls fixture recording behavior for tests and tooling.

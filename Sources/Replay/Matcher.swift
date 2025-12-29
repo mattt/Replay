@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 /// Strategy for matching incoming requests to recorded HAR entries.
 public enum Matcher: Sendable {
     /// Matches HTTP method
