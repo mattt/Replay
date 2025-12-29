@@ -111,10 +111,10 @@ struct FilterTests {
                 HAR.QueryParameter(name: "page", value: "1"),
             ])
 
-            let filter = Filter.queryParameters(names: ["api_key"], replacement: "FILTERED")
+            let filter = Filter.queryParameters(names: ["api_key"], replacement: "[FILTERED]")
             let result = await filter.apply(to: entry)
 
-            #expect(result.request.queryString[0].value == "FILTERED")
+            #expect(result.request.queryString[0].value == "[FILTERED]")
             #expect(result.request.queryString[1].value == "1")
         }
 
@@ -141,7 +141,7 @@ struct FilterTests {
                 HAR.QueryParameter(name: "api_key", value: "secret", comment: "API key param")
             ])
 
-            let filter = Filter.queryParameters(names: ["api_key"], replacement: "FILTERED")
+            let filter = Filter.queryParameters(names: ["api_key"], replacement: "[FILTERED]")
             let result = await filter.apply(to: entry)
 
             #expect(result.request.queryString[0].name == "api_key")
@@ -155,11 +155,11 @@ struct FilterTests {
                 HAR.QueryParameter(name: "api_key", value: "value2"),
             ])
 
-            let filter = Filter.queryParameters(names: ["api_key"], replacement: "FILTERED")
+            let filter = Filter.queryParameters(names: ["api_key"], replacement: "[FILTERED]")
             let result = await filter.apply(to: entry)
 
             #expect(result.request.queryString[0].value == "value1")
-            #expect(result.request.queryString[1].value == "FILTERED")
+            #expect(result.request.queryString[1].value == "[FILTERED]")
         }
     }
 
@@ -512,8 +512,8 @@ struct FilterTests {
             let filter = Filter.queryParameters("api_key", "token")
             let result = await filter.apply(to: entry)
 
-            #expect(result.request.queryString[0].value == "FILTERED")
-            #expect(result.request.queryString[1].value == "FILTERED")
+            #expect(result.request.queryString[0].value == "[FILTERED]")
+            #expect(result.request.queryString[1].value == "[FILTERED]")
         }
 
         @Test("queryParameters variadic with custom replacement")
@@ -551,7 +551,7 @@ struct FilterTests {
             let filter = Filter.queryParameters(removing: ["secret"])
             let result = await filter.apply(to: entry)
 
-            #expect(result.request.queryString[0].value == "FILTERED")
+            #expect(result.request.queryString[0].value == "[FILTERED]")
         }
 
         @Test("body replacing convenience method")

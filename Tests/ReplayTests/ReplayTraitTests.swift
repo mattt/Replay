@@ -151,7 +151,7 @@ struct ReplayTraitTests {
         let filtered = await filter.apply(to: entry)
 
         let apiKeyParam = filtered.request.queryString.first { $0.name == "api_key" }
-        #expect(apiKeyParam?.value == "FILTERED")
+        #expect(apiKeyParam?.value == "[FILTERED]")
 
         let queryParam = filtered.request.queryString.first { $0.name == "q" }
         #expect(queryParam?.value == "test")

@@ -161,7 +161,7 @@ extension Filter {
     /// - Parameters:
     ///   - names: Parameter names to redact.
     ///   - replacement: The replacement value to use.
-    public static func queryParameters(_ names: String..., replacement: String = "FILTERED") -> Self {
+    public static func queryParameters(_ names: String..., replacement: String = "[FILTERED]") -> Self {
         .queryParameters(removing: names, replacement: replacement)
     }
 
@@ -175,7 +175,7 @@ extension Filter {
     ///   - replacement: The replacement value to use.
     public static func queryParameters(
         removing parameters: [String],
-        replacement: String = "FILTERED"
+        replacement: String = "[FILTERED]"
     ) -> Self {
         .queryParameters(names: Set(parameters), replacement: replacement)
     }
