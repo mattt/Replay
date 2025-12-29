@@ -109,7 +109,8 @@ public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
                 return
             }
 
-            guard let httpResponse = response as? HTTPURLResponse,
+            guard
+                let httpResponse = response as? HTTPURLResponse,
                 let data,
                 let startTime = self.startTime
             else {
