@@ -118,7 +118,7 @@ import Foundation
             )
 
             // Register URLProtocol globally for zero-config interception.
-            URLProtocol.registerClass(PlaybackURLProtocol.self)
+            _ = URLProtocol.registerClass(PlaybackURLProtocol.self)
             defer {
                 URLProtocol.unregisterClass(PlaybackURLProtocol.self)
             }
