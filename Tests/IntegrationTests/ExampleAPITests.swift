@@ -26,8 +26,6 @@ struct Post: Codable {
 
 /// A simple API client that demonstrates how Replay integrates with real code.
 actor ExampleAPIClient {
-    static let shared = ExampleAPIClient()
-
     let baseURL: URL
     let session: URLSession
 
@@ -79,7 +77,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchUser.har`
     @Test(.replay("fetchUser", matching: [.method, .path]))
     func fetchUser() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -92,7 +90,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchPosts.har`
     @Test(.replay("fetchPosts", matching: [.method, .path]))
     func fetchPosts() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let posts = try await client.fetchPosts()
 
         #expect(posts.count == 3)
@@ -105,7 +103,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchPosts.har` (contains both GET and POST entries)
     @Test(.replay("fetchPosts", matching: [.method, .path]))
     func createPost() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let post = try await client.createPost(title: "New Post", authorId: 42)
 
         #expect(post.id == 4)
@@ -125,7 +123,7 @@ struct ExampleAPITests {
         )
     )
     func fetchUserWithFilters() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.name == "Alice")
@@ -156,7 +154,7 @@ struct ExampleAPITests {
         )
     )
     func fetchUserFromStubs() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -272,7 +270,7 @@ struct ExampleAPITestsWithoutPlaybackIsolated {
     /// Uses: `Replays/fetchUser.har`
     @Test("Fetch User Without Playback Isolated", .replay("fetchUser"))
     func fetchUser() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -284,7 +282,7 @@ struct ExampleAPITestsWithoutPlaybackIsolated {
 // MARK: - Test without Suite
 @Test("Fetch User Without Suite", .replay("fetchUser"))
 func fetchUserWithoutSuite() async throws {
-    let client = ExampleAPIClient.shared
+    let client = ExampleAPIClient(session: Replay.session)
     let user = try await client.fetchUser(id: 42)
 
     #expect(user.id == 42)
