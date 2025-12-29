@@ -7,7 +7,7 @@ on:
     branches: ["main"]
 
 jobs:
-  test:
+  test-macos:
     name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}
     runs-on: macos-${{ matrix.macos }}
     env:
@@ -36,6 +36,37 @@ jobs:
           key: ${{ runner.os }}-swift-${{ matrix.swift }}-spm-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-swift-${{ matrix.swift }}-spm-
+
+      - name: Lint
+        run: swift format lint --strict --recursive .
+
+      - name: Build
+        run: swift build -v
+
+      - name: Smoke test plugin
+        run: swift package plugin --allow-writing-to-package-directory replay --help
+
+      - name: Test
+        run: swift test -v
+
+  test-linux:
+    name: Swift ${{ matrix.swift-version }} on Linux
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift-version:
+          - "6.1.3"
+          - "6.2.3"
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: vapor/swiftly-action@v0.2
+        with:
+          toolchain: ${{ matrix.swift-version }}
 
       - name: Lint
         run: swift format lint --strict --recursive .
