@@ -115,7 +115,7 @@ public struct CaptureConfiguration: Sendable {
 ///
 /// `CaptureURLProtocol` forwards responses to the requesting client,
 /// and records the request/response pair asynchronously.
-public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
+public final class CaptureURLProtocol: URLProtocol {
     private static let handledKey = "ReplayCaptureHandled"
 
     private var startTime: Date?
@@ -191,6 +191,19 @@ public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
 }
+
+// Satisfy Sendable requirements for CaptureURLProtocol depending on platform.
+// On Apple platforms, URLProtocol does not conform to Sendable, so we provide conformance.
+// On Linux, URLSession completion handlers became strictly `@Sendable` in Swift 6.2,
+// and `URLProtocol` is not Sendable there, so we provide `@unchecked Sendable` conformance.
+#if canImport(FoundationNetworking)
+    #if swift(>=6.2)
+        extension CaptureURLProtocol: @unchecked Sendable {}
+    #endif
+#else
+    // Apple platforms: URLProtocol does not conform to Sendable.
+    extension CaptureURLProtocol: @unchecked Sendable {}
+#endif
 
 // MARK: - Capture Store (Actor for thread safety)
 
