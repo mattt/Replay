@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 // MARK: - Playback Session Factory
 
 /// Playback APIs for replaying HTTP traffic from recorded sources.

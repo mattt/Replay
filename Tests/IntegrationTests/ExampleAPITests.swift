@@ -1,4 +1,9 @@
 import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 import Testing
 
 @testable import Replay
@@ -21,8 +26,6 @@ struct Post: Codable {
 
 /// A simple API client that demonstrates how Replay integrates with real code.
 actor ExampleAPIClient {
-    static let shared = ExampleAPIClient()
-
     let baseURL: URL
     let session: URLSession
 
@@ -74,7 +77,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchUser.har`
     @Test(.replay("fetchUser", matching: [.method, .path]))
     func fetchUser() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -87,7 +90,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchPosts.har`
     @Test(.replay("fetchPosts", matching: [.method, .path]))
     func fetchPosts() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let posts = try await client.fetchPosts()
 
         #expect(posts.count == 3)
@@ -100,7 +103,7 @@ struct ExampleAPITests {
     /// Uses: `Replays/fetchPosts.har` (contains both GET and POST entries)
     @Test(.replay("fetchPosts", matching: [.method, .path]))
     func createPost() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let post = try await client.createPost(title: "New Post", authorId: 42)
 
         #expect(post.id == 4)
@@ -120,7 +123,7 @@ struct ExampleAPITests {
         )
     )
     func fetchUserWithFilters() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.name == "Alice")
@@ -151,7 +154,7 @@ struct ExampleAPITests {
         )
     )
     func fetchUserFromStubs() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -197,62 +200,65 @@ struct ExampleAPITests {
         }
     }
 
-    @Test("Unmatched request in strict mode provides helpful error")
-    func unmatchedRequestError() async throws {
-        let entry = HAR.Entry(
-            startedDateTime: Date(),
-            time: 100,
-            request: HAR.Request(
-                method: "GET",
-                url: "https://api.example.com/known",
-                httpVersion: "HTTP/1.1",
-                headers: [],
-                bodySize: 0
-            ),
-            response: HAR.Response(
-                status: 200,
-                statusText: "OK",
-                httpVersion: "HTTP/1.1",
-                headers: [],
-                content: HAR.Content(size: 2, mimeType: "text/plain", text: "OK"),
-                bodySize: 2
-            ),
-            timings: HAR.Timings(send: 0, wait: 100, receive: 0)
-        )
+    // URLProtocol works differently on Linux; this test relies on Apple-specific behavior
+    #if !canImport(FoundationNetworking)
+        @Test("Unmatched request in strict mode provides helpful error")
+        func unmatchedRequestError() async throws {
+            let entry = HAR.Entry(
+                startedDateTime: Date(),
+                time: 100,
+                request: HAR.Request(
+                    method: "GET",
+                    url: "https://api.example.com/known",
+                    httpVersion: "HTTP/1.1",
+                    headers: [],
+                    bodySize: 0
+                ),
+                response: HAR.Response(
+                    status: 200,
+                    statusText: "OK",
+                    httpVersion: "HTTP/1.1",
+                    headers: [],
+                    content: HAR.Content(size: 2, mimeType: "text/plain", text: "OK"),
+                    bodySize: 2
+                ),
+                timings: HAR.Timings(send: 0, wait: 100, receive: 0)
+            )
 
-        let config = PlaybackConfiguration(
-            source: .entries([entry]),
-            playbackMode: .strict,
-            recordMode: .none,
-            matchers: .default
-        )
+            let config = PlaybackConfiguration(
+                source: .entries([entry]),
+                playbackMode: .strict,
+                recordMode: .none,
+                matchers: .default
+            )
 
-        do {
-            let session = try await Playback.session(configuration: config)
-            _ = try await session.data(
-                from: URL(string: "https://api.example.com/unknown")!)
-            Issue.record("Expected noMatchingEntry error")
-        } catch let error {
-            // URLSession may wrap ReplayError in NSError
-            if let replayError = error as? ReplayError {
-                // Direct ReplayError
-                let description = replayError.description
-                #expect(description.contains("No Matching Entry"))
-                #expect(description.contains("/unknown"))
-            } else if let nsError = error as NSError?,
-                nsError.domain == "Replay.ReplayError"
-            {
-                // URLSession wrapped the error - verify it's a ReplayError
-                #expect(nsError.domain == "Replay.ReplayError")
-                #expect(nsError.localizedDescription == "No Matching Entry")
-                // Verify the detailed message is in failureReason
-                #expect(nsError.localizedFailureReason?.contains("No Matching Entry") == true)
-                #expect(nsError.localizedFailureReason?.contains("/unknown") == true)
-            } else {
-                throw error  // Not a ReplayError, re-throw
+            do {
+                let session = try await Playback.session(configuration: config)
+                _ = try await session.data(
+                    from: URL(string: "https://api.example.com/unknown")!)
+                Issue.record("Expected noMatchingEntry error")
+            } catch let error {
+                // URLSession may wrap ReplayError in NSError
+                if let replayError = error as? ReplayError {
+                    // Direct ReplayError
+                    let description = replayError.description
+                    #expect(description.contains("No Matching Entry"))
+                    #expect(description.contains("/unknown"))
+                } else if let nsError = error as NSError?,
+                    nsError.domain == "Replay.ReplayError"
+                {
+                    // URLSession wrapped the error - verify it's a ReplayError
+                    #expect(nsError.domain == "Replay.ReplayError")
+                    #expect(nsError.localizedDescription == "No Matching Entry")
+                    // Verify the detailed message is in failureReason
+                    #expect(nsError.localizedFailureReason?.contains("No Matching Entry") == true)
+                    #expect(nsError.localizedFailureReason?.contains("/unknown") == true)
+                } else {
+                    throw error  // Not a ReplayError, re-throw
+                }
             }
         }
-    }
+    #endif
 }
 
 // MARK: - Suite without .playbackIsolated
@@ -264,7 +270,7 @@ struct ExampleAPITestsWithoutPlaybackIsolated {
     /// Uses: `Replays/fetchUser.har`
     @Test("Fetch User Without Playback Isolated", .replay("fetchUser"))
     func fetchUser() async throws {
-        let client = ExampleAPIClient.shared
+        let client = ExampleAPIClient(session: Replay.session)
         let user = try await client.fetchUser(id: 42)
 
         #expect(user.id == 42)
@@ -276,7 +282,7 @@ struct ExampleAPITestsWithoutPlaybackIsolated {
 // MARK: - Test without Suite
 @Test("Fetch User Without Suite", .replay("fetchUser"))
 func fetchUserWithoutSuite() async throws {
-    let client = ExampleAPIClient.shared
+    let client = ExampleAPIClient(session: Replay.session)
     let user = try await client.fetchUser(id: 42)
 
     #expect(user.id == 42)

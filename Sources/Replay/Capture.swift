@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+
 // MARK: - Capture Session Factory
 
 /// The Capture API records live HTTP traffic into HAR entries.
@@ -111,7 +115,7 @@ public struct CaptureConfiguration: Sendable {
 ///
 /// `CaptureURLProtocol` forwards responses to the requesting client,
 /// and records the request/response pair asynchronously.
-public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
+public final class CaptureURLProtocol: URLProtocol {
     private static let handledKey = "ReplayCaptureHandled"
 
     private var startTime: Date?
@@ -140,9 +144,12 @@ public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
         let session = URLSession.shared
+        // URLSession completion handlers are strictly @Sendable in Swift 6.
+        // We use a wrapper to capture `weak self` safely without requiring Sendable conformance on Linux.
+        let weakSelf = UnsafeWeakSendable(self)
         dataTask = session.dataTask(with: mutableRequest as URLRequest) {
-            [weak self] data, response, error in
-            guard let self else { return }
+            data, response, error in
+            guard let self = weakSelf.value else { return }
 
             if let error {
                 self.client?.urlProtocol(self, didFailWithError: error)
@@ -186,6 +193,21 @@ public final class CaptureURLProtocol: URLProtocol, @unchecked Sendable {
         dataTask?.cancel()
     }
 
+}
+
+// Satisfy Sendable requirements for CaptureURLProtocol depending on platform.
+// On Apple platforms, URLProtocol does not conform to Sendable, so we provide conformance.
+#if !canImport(FoundationNetworking)
+    extension CaptureURLProtocol: @unchecked Sendable {}
+#endif
+
+/// Wrapper to send weak references to non-Sendable values across isolation boundaries.
+private struct UnsafeWeakSendable<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+
+    init(_ value: T) {
+        self.value = value
+    }
 }
 
 // MARK: - Capture Store (Actor for thread safety)
