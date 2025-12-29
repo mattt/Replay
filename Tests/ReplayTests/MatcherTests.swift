@@ -209,6 +209,250 @@ struct MatcherTests {
             let matchers: [Matcher] = [.query]
             #expect(matchers.matches(request1, request2))
         }
+
+        @Test("matches query items with nil values")
+        func matchesQueryItemsWithNilValues() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key")
+            let request2 = makeRequest(urlString: "https://example.com/path?key")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when one query item has value and other has nil")
+        func doesNotMatchValueVsNil() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=value")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches empty query string vs no query")
+        func matchesEmptyQueryStringVsNoQuery() {
+            let request1 = makeRequest(urlString: "https://example.com/path?")
+            let request2 = makeRequest(urlString: "https://example.com/path")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("matches multiple query items with same name")
+        func matchesDuplicateQueryParameterNames() {
+            let request1 = makeRequest(urlString: "https://example.com/path?a=1&a=2")
+            let request2 = makeRequest(urlString: "https://example.com/path?a=2&a=1")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when duplicate parameter counts differ")
+        func doesNotMatchDifferentDuplicateCounts() {
+            let request1 = makeRequest(urlString: "https://example.com/path?a=1&a=2")
+            let request2 = makeRequest(urlString: "https://example.com/path?a=1")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when request has nil URL")
+        func doesNotMatchWhenRequestHasNilURL() {
+            let request1 = URLRequest(url: URL(string: "https://example.com/path?a=1")!)
+            var request2 = URLRequest(url: URL(string: "https://example.com/path?a=1")!)
+            request2.url = nil
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when candidate has nil URL")
+        func doesNotMatchWhenCandidateHasNilURL() {
+            var request1 = URLRequest(url: URL(string: "https://example.com/path?a=1")!)
+            let request2 = URLRequest(url: URL(string: "https://example.com/path?a=1")!)
+            request1.url = nil
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches URL-encoded query values")
+        func matchesURLEncodedQueryValues() {
+            let request1 = makeRequest(urlString: "https://example.com/path?q=hello%20world")
+            let request2 = makeRequest(urlString: "https://example.com/path?q=hello%20world")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("matches query parameter names case-sensitively")
+        func matchesQueryParameterNamesCaseSensitively() {
+            let request1 = makeRequest(urlString: "https://example.com/path?Key=value")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=value")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches query parameter values case-sensitively")
+        func matchesQueryParameterValuesCaseSensitively() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key=Value")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=value")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches complex query with multiple parameters and values")
+        func matchesComplexQuery() {
+            let request1 = makeRequest(urlString: "https://example.com/path?a=1&b=2&c=3&d=4")
+            let request2 = makeRequest(urlString: "https://example.com/path?d=4&c=3&b=2&a=1")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("matches query with special characters")
+        func matchesQueryWithSpecialCharacters() {
+            let request1 = makeRequest(urlString: "https://example.com/path?email=user%40example.com&token=abc123")
+            let request2 = makeRequest(urlString: "https://example.com/path?token=abc123&email=user%40example.com")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("normalizes query items by sorting name then value")
+        func normalizesQueryItemsBySorting() {
+            // Test that normalization correctly sorts items with same name but different values
+            let request1 = makeRequest(urlString: "https://example.com/path?a=2&a=1&b=3")
+            let request2 = makeRequest(urlString: "https://example.com/path?a=1&a=2&b=3")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("normalizes query items with nil values before non-nil")
+        func normalizesNilValuesBeforeNonNil() {
+            // Test that items with nil values are sorted before items with values
+            let request1 = makeRequest(urlString: "https://example.com/path?key=value&flag&other=test")
+            let request2 = makeRequest(urlString: "https://example.com/path?flag&key=value&other=test")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("matches duplicate parameters with mixed nil and non-nil values")
+        func matchesDuplicateParametersWithMixedNilAndNonNil() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key&key=value&key=other")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=other&key&key=value")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("does not match when duplicate parameters have different value sets")
+        func doesNotMatchDifferentDuplicateValueSets() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key=1&key=2")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=1&key=3")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("handles URLComponents with nil queryItems")
+        func handlesURLComponentsWithNilQueryItems() {
+            // Create a URL that might result in nil queryItems
+            var components = URLComponents()
+            components.scheme = "https"
+            components.host = "example.com"
+            components.path = "/path"
+            // queryItems is nil, not empty array
+            let url = components.url!
+
+            let request1 = URLRequest(url: url)
+            let request2 = makeRequest(urlString: "https://example.com/path")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("matches when both have nil queryItems from URLComponents")
+        func matchesWhenBothHaveNilQueryItems() {
+            var components1 = URLComponents()
+            components1.scheme = "https"
+            components1.host = "example.com"
+            components1.path = "/path1"
+
+            var components2 = URLComponents()
+            components2.scheme = "https"
+            components2.host = "example.com"
+            components2.path = "/path2"
+
+            let request1 = URLRequest(url: components1.url!)
+            let request2 = URLRequest(url: components2.url!)
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("normalizes query items alphabetically by name")
+        func normalizesQueryItemsAlphabeticallyByName() {
+            // Test that items are sorted by name first
+            let request1 = makeRequest(urlString: "https://example.com/path?z=last&a=first&m=middle")
+            let request2 = makeRequest(urlString: "https://example.com/path?a=first&m=middle&z=last")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("normalizes query items by value when names are equal")
+        func normalizesQueryItemsByValueWhenNamesEqual() {
+            // Test that when names are equal, values are sorted
+            let request1 = makeRequest(urlString: "https://example.com/path?key=zebra&key=apple&key=banana")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=apple&key=banana&key=zebra")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("handles query items with empty string values")
+        func handlesQueryItemsWithEmptyStringValues() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key=&other=value")
+            let request2 = makeRequest(urlString: "https://example.com/path?other=value&key=")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("distinguishes between empty string value and nil value")
+        func distinguishesBetweenEmptyStringAndNilValue() {
+            let request1 = makeRequest(urlString: "https://example.com/path?key")
+            let request2 = makeRequest(urlString: "https://example.com/path?key=")
+
+            let matchers: [Matcher] = [.query]
+            #expect(!matchers.matches(request1, request2))
+        }
+
+        @Test("matches complex query with duplicates and nil values")
+        func matchesComplexQueryWithDuplicatesAndNilValues() {
+            let request1 = makeRequest(urlString: "https://example.com/path?a=1&flag&a=2&b=test&flag&c=3")
+            let request2 = makeRequest(urlString: "https://example.com/path?c=3&flag&a=2&b=test&a=1&flag")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
+
+        @Test("handles resolvingAgainstBaseURL behavior")
+        func handlesResolvingAgainstBaseURLBehavior() {
+            // Test that resolvingAgainstBaseURL: true works correctly
+            let baseURL = URL(string: "https://example.com/base")!
+            let relativeURL = URL(string: "path?a=1&b=2", relativeTo: baseURL)!
+
+            let request1 = URLRequest(url: relativeURL)
+            let request2 = makeRequest(urlString: "https://example.com/base/path?a=1&b=2")
+
+            let matchers: [Matcher] = [.query]
+            #expect(matchers.matches(request1, request2))
+        }
     }
 
     // MARK: - Headers Matcher Tests
@@ -636,63 +880,10 @@ private func makeTestEntry(
 private extension [Matcher] {
     func matches(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
         for matcher in self {
-            switch matcher {
-            case .method:
-                if request.httpMethod?.uppercased() != candidate.httpMethod?.uppercased() { return false }
-            case .url:
-                if request.url?.absoluteString != candidate.url?.absoluteString { return false }
-            case .host:
-                if request.url?.host != candidate.url?.host { return false }
-            case .path:
-                if request.url?.path != candidate.url?.path { return false }
-            case .query:
-                guard let url1 = request.url, let url2 = candidate.url else { return false }
-                let c1 = URLComponents(url: url1, resolvingAgainstBaseURL: true)
-                let c2 = URLComponents(url: url2, resolvingAgainstBaseURL: true)
-                let q1 = normalizedQueryItems(c1?.queryItems)
-                let q2 = normalizedQueryItems(c2?.queryItems)
-                if q1 != q2 { return false }
-            case .fragment:
-                if request.url?.fragment != candidate.url?.fragment { return false }
-            case .headers(let names):
-                for name in names {
-                    if request.value(forHTTPHeaderField: name)
-                        != candidate.value(forHTTPHeaderField: name)
-                    {
-                        return false
-                    }
-                }
-            case .body:
-                if request.httpBody != candidate.httpBody { return false }
-            case .custom(let block):
-                if !block(request, candidate) { return false }
+            if !matcher.test(request, candidate) {
+                return false
             }
         }
         return true
-    }
-
-    private func normalizedQueryItems(_ items: [URLQueryItem]?) -> [NormalizedQueryItem] {
-        let normalized = (items ?? []).map { NormalizedQueryItem($0) }
-        return normalized.sorted()
-    }
-
-    private struct NormalizedQueryItem: Comparable {
-        let name: String
-        let value: String?
-
-        init(_ item: URLQueryItem) {
-            self.name = item.name
-            self.value = item.value
-        }
-
-        static func < (lhs: Self, rhs: Self) -> Bool {
-            if lhs.name != rhs.name { return lhs.name < rhs.name }
-            switch (lhs.value, rhs.value) {
-            case (nil, nil): return false
-            case (nil, _?): return true
-            case (_?, nil): return false
-            case (let l?, let r?): return l < r
-            }
-        }
     }
 }

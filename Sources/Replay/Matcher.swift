@@ -45,7 +45,7 @@ public enum Matcher: Sendable {
     /// Compares an incoming request against a candidate request (typically from a recorded entry).
     case custom(@Sendable (_ request: URLRequest, _ candidate: URLRequest) -> Bool)
 
-    fileprivate func matches(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
+    func test(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
         switch self {
         case .method:
             return request.httpMethod?.uppercased() == candidate.httpMethod?.uppercased()
@@ -60,15 +60,13 @@ public enum Matcher: Sendable {
             return request.url?.path == candidate.url?.path
 
         case .query:
-            guard
-                let url1 = request.url,
+            guard let url1 = request.url,
                 let url2 = candidate.url
             else { return false }
 
             let components1 = URLComponents(url: url1, resolvingAgainstBaseURL: true)
             let components2 = URLComponents(url: url2, resolvingAgainstBaseURL: true)
-            return normalizedQueryItems(components1?.queryItems)
-                == normalizedQueryItems(components2?.queryItems)
+            return normalizedQueryItems(components1?.queryItems) == normalizedQueryItems(components2?.queryItems)
 
         case .fragment:
             return request.url?.fragment == candidate.url?.fragment
@@ -133,7 +131,7 @@ extension Array where Element == Matcher {
     /// This is used by capture as an opt-in filter.
     public func matches(_ request: URLRequest) -> Bool {
         for matcher in self {
-            if !matcher.matches(request, request) {
+            if !matcher.test(request, request) {
                 return false
             }
         }
@@ -169,7 +167,7 @@ extension Array where Element == Matcher {
 
     private func matches(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
         for matcher in self {
-            if !matcher.matches(request, candidate) {
+            if !matcher.test(request, candidate) {
                 return false
             }
         }
