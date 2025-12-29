@@ -590,31 +590,34 @@ struct PlaybackTests {
             #expect(response.statusCode == 204)
         }
 
-        @Test("live mode ignores recorded entries and always hits the network")
-        func liveModeIgnoresEntries() async throws {
-            URLProtocol.registerClass(NetworkStubURLProtocol.self)
-            defer { URLProtocol.unregisterClass(NetworkStubURLProtocol.self) }
+        // URLProtocol.registerClass behavior differs on Linux
+        #if !canImport(FoundationNetworking)
+            @Test("live mode ignores recorded entries and always hits the network")
+            func liveModeIgnoresEntries() async throws {
+                URLProtocol.registerClass(NetworkStubURLProtocol.self)
+                defer { URLProtocol.unregisterClass(NetworkStubURLProtocol.self) }
 
-            NetworkStubURLProtocol.response = (status: 204, body: Data())
+                NetworkStubURLProtocol.response = (status: 204, body: Data())
 
-            let store = PlaybackStore()
-            let url = URL(string: "https://network-stub.example/status")!
-            let matchingEntry = makeTestEntryFor(url: url, status: 200, body: "fixture")
+                let store = PlaybackStore()
+                let url = URL(string: "https://network-stub.example/status")!
+                let matchingEntry = makeTestEntryFor(url: url, status: 200, body: "fixture")
 
-            try await store.configure(
-                PlaybackConfiguration(
-                    source: .entries([matchingEntry]),
-                    playbackMode: .live,
-                    recordMode: .none
+                try await store.configure(
+                    PlaybackConfiguration(
+                        source: .entries([matchingEntry]),
+                        playbackMode: .live,
+                        recordMode: .none
+                    )
                 )
-            )
 
-            var request = URLRequest(url: url)
-            request.httpMethod = "GET"
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
 
-            let (response, _) = try await store.handleRequest(request)
-            #expect(response.statusCode == 204)  // from NetworkStubURLProtocol, not fixture
-        }
+                let (response, _) = try await store.handleRequest(request)
+                #expect(response.statusCode == 204)  // from NetworkStubURLProtocol, not fixture
+            }
+        #endif
 
         @Test("multiple stubs match by URL")
         func multipleStubsMatchByURL() async throws {

@@ -23,68 +23,71 @@ struct ReplayTraitTests {
         }
     }
 
-    @Test("Playback from in-memory entries")
-    func playbackFromEntries() async throws {
-        let entry = makeTestEntry(
-            url: "https://api.example.com/users/1",
-            method: "GET",
-            status: 200,
-            body: #"{"id":1,"name":"Test User"}"#
-        )
+    // URLProtocol works differently on Linux; these tests rely on Apple-specific behavior
+    #if !canImport(FoundationNetworking)
+        @Test("Playback from in-memory entries")
+        func playbackFromEntries() async throws {
+            let entry = makeTestEntry(
+                url: "https://api.example.com/users/1",
+                method: "GET",
+                status: 200,
+                body: #"{"id":1,"name":"Test User"}"#
+            )
 
-        let config = PlaybackConfiguration(
-            source: .entries([entry]),
-            playbackMode: .strict,
-            recordMode: .none,
-            matchers: .default
-        )
+            let config = PlaybackConfiguration(
+                source: .entries([entry]),
+                playbackMode: .strict,
+                recordMode: .none,
+                matchers: .default
+            )
 
-        let session = try await Playback.session(configuration: config)
-
-        let url = URL(string: "https://api.example.com/users/1")!
-        let (data, response) = try await session.data(from: url)
-
-        let httpResponse = try #require(response as? HTTPURLResponse)
-        #expect(httpResponse.statusCode == 200)
-
-        let json = try #require(String(data: data, encoding: .utf8))
-        #expect(json.contains("Test User"))
-    }
-
-    @Test("Playback strict mode throws on unmatched request")
-    func strictModeThrowsOnMismatch() async throws {
-        let entry = makeTestEntry(
-            url: "https://api.example.com/users/1",
-            method: "GET",
-            status: 200,
-            body: "{}"
-        )
-
-        let config = PlaybackConfiguration(
-            source: .entries([entry]),
-            playbackMode: .strict,
-            recordMode: .none,
-            matchers: .default
-        )
-
-        do {
             let session = try await Playback.session(configuration: config)
-            _ = try await session.data(
-                from: URL(string: "https://api.example.com/users/999")!)
-            Issue.record("Expected noMatchingEntry error")
-        } catch {
-            // URLSession wraps ReplayError in NSError, but LocalizedError preserves description
-            let description: String
-            if let replayError = error as? ReplayError {
-                description = replayError.description
-            } else {
-                description = (error as NSError).localizedDescription
-            }
 
-            // Verify it's a ReplayError by checking the description
-            #expect(description.contains("No Matching Entry") || description.contains("Replay"))
+            let url = URL(string: "https://api.example.com/users/1")!
+            let (data, response) = try await session.data(from: url)
+
+            let httpResponse = try #require(response as? HTTPURLResponse)
+            #expect(httpResponse.statusCode == 200)
+
+            let json = try #require(String(data: data, encoding: .utf8))
+            #expect(json.contains("Test User"))
         }
-    }
+
+        @Test("Playback strict mode throws on unmatched request")
+        func strictModeThrowsOnMismatch() async throws {
+            let entry = makeTestEntry(
+                url: "https://api.example.com/users/1",
+                method: "GET",
+                status: 200,
+                body: "{}"
+            )
+
+            let config = PlaybackConfiguration(
+                source: .entries([entry]),
+                playbackMode: .strict,
+                recordMode: .none,
+                matchers: .default
+            )
+
+            do {
+                let session = try await Playback.session(configuration: config)
+                _ = try await session.data(
+                    from: URL(string: "https://api.example.com/users/999")!)
+                Issue.record("Expected noMatchingEntry error")
+            } catch {
+                // URLSession wraps ReplayError in NSError, but LocalizedError preserves description
+                let description: String
+                if let replayError = error as? ReplayError {
+                    description = replayError.description
+                } else {
+                    description = (error as NSError).localizedDescription
+                }
+
+                // Verify it's a ReplayError by checking the description
+                #expect(description.contains("No Matching Entry") || description.contains("Replay"))
+            }
+        }
+    #endif
 
     @Test("Matcher matches by method and URL")
     func matcherMatchesByMethodAndURL() async throws {

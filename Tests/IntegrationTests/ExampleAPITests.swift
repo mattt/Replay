@@ -202,62 +202,65 @@ struct ExampleAPITests {
         }
     }
 
-    @Test("Unmatched request in strict mode provides helpful error")
-    func unmatchedRequestError() async throws {
-        let entry = HAR.Entry(
-            startedDateTime: Date(),
-            time: 100,
-            request: HAR.Request(
-                method: "GET",
-                url: "https://api.example.com/known",
-                httpVersion: "HTTP/1.1",
-                headers: [],
-                bodySize: 0
-            ),
-            response: HAR.Response(
-                status: 200,
-                statusText: "OK",
-                httpVersion: "HTTP/1.1",
-                headers: [],
-                content: HAR.Content(size: 2, mimeType: "text/plain", text: "OK"),
-                bodySize: 2
-            ),
-            timings: HAR.Timings(send: 0, wait: 100, receive: 0)
-        )
+    // URLProtocol works differently on Linux; this test relies on Apple-specific behavior
+    #if !canImport(FoundationNetworking)
+        @Test("Unmatched request in strict mode provides helpful error")
+        func unmatchedRequestError() async throws {
+            let entry = HAR.Entry(
+                startedDateTime: Date(),
+                time: 100,
+                request: HAR.Request(
+                    method: "GET",
+                    url: "https://api.example.com/known",
+                    httpVersion: "HTTP/1.1",
+                    headers: [],
+                    bodySize: 0
+                ),
+                response: HAR.Response(
+                    status: 200,
+                    statusText: "OK",
+                    httpVersion: "HTTP/1.1",
+                    headers: [],
+                    content: HAR.Content(size: 2, mimeType: "text/plain", text: "OK"),
+                    bodySize: 2
+                ),
+                timings: HAR.Timings(send: 0, wait: 100, receive: 0)
+            )
 
-        let config = PlaybackConfiguration(
-            source: .entries([entry]),
-            playbackMode: .strict,
-            recordMode: .none,
-            matchers: .default
-        )
+            let config = PlaybackConfiguration(
+                source: .entries([entry]),
+                playbackMode: .strict,
+                recordMode: .none,
+                matchers: .default
+            )
 
-        do {
-            let session = try await Playback.session(configuration: config)
-            _ = try await session.data(
-                from: URL(string: "https://api.example.com/unknown")!)
-            Issue.record("Expected noMatchingEntry error")
-        } catch let error {
-            // URLSession may wrap ReplayError in NSError
-            if let replayError = error as? ReplayError {
-                // Direct ReplayError
-                let description = replayError.description
-                #expect(description.contains("No Matching Entry"))
-                #expect(description.contains("/unknown"))
-            } else if let nsError = error as NSError?,
-                nsError.domain == "Replay.ReplayError"
-            {
-                // URLSession wrapped the error - verify it's a ReplayError
-                #expect(nsError.domain == "Replay.ReplayError")
-                #expect(nsError.localizedDescription == "No Matching Entry")
-                // Verify the detailed message is in failureReason
-                #expect(nsError.localizedFailureReason?.contains("No Matching Entry") == true)
-                #expect(nsError.localizedFailureReason?.contains("/unknown") == true)
-            } else {
-                throw error  // Not a ReplayError, re-throw
+            do {
+                let session = try await Playback.session(configuration: config)
+                _ = try await session.data(
+                    from: URL(string: "https://api.example.com/unknown")!)
+                Issue.record("Expected noMatchingEntry error")
+            } catch let error {
+                // URLSession may wrap ReplayError in NSError
+                if let replayError = error as? ReplayError {
+                    // Direct ReplayError
+                    let description = replayError.description
+                    #expect(description.contains("No Matching Entry"))
+                    #expect(description.contains("/unknown"))
+                } else if let nsError = error as NSError?,
+                    nsError.domain == "Replay.ReplayError"
+                {
+                    // URLSession wrapped the error - verify it's a ReplayError
+                    #expect(nsError.domain == "Replay.ReplayError")
+                    #expect(nsError.localizedDescription == "No Matching Entry")
+                    // Verify the detailed message is in failureReason
+                    #expect(nsError.localizedFailureReason?.contains("No Matching Entry") == true)
+                    #expect(nsError.localizedFailureReason?.contains("/unknown") == true)
+                } else {
+                    throw error  // Not a ReplayError, re-throw
+                }
             }
         }
-    }
+    #endif
 }
 
 // MARK: - Suite without .playbackIsolated
