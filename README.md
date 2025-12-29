@@ -1,46 +1,11 @@
 # Replay
 
 HTTP recording, playback, and stubbing for Swift,
-built around <abbr title="HTTP Archive">HAR</abbr> fixtures
-and Swift Testing traits.
+built around <a href="https://en.wikipedia.org/wiki/HAR_(file_format)"><abbr title="HTTP Archive">HAR</abbr> fixtures</a>
+and [Swift Testing traits](https://developer.apple.com/documentation/testing/traits).
 
-## Requirements
-
-- Swift 6.1+
-- macOS 14+ / iOS 17+ / tvOS 17+ / watchOS 10+ / visionOS 1+
-
-## Installation
-
-### Swift Package Manager
-
-Add to your `Package.swift`:
-
-```swift
-dependencies: [
-    .package(url: "https://github.com/mattt/Replay.git", branch: "main")
-]
-```
-
-Then add `Replay` to your **test target** dependencies:
-
-```swift
-.testTarget(
-    name: "YourTests",
-    dependencies: [
-        .product(name: "Replay", package: "Replay")
-    ]
-)
-```
-
-### Xcode
-
-1. Add the package: **File → Add Packages…**
-2. Add **Replay** to your **test target**.
-
-If you want to ship HAR files in your test bundle,
-ensure they're included as test resources (see the tutorial below).
-
-## Quick start
+Add the `.replay` trait to a `@Test` declaration to specify a HAR file
+containing prerecorded HTTP responses:
 
 ```swift
 import Foundation
@@ -55,6 +20,7 @@ struct User: Codable {
 
 @Test(.replay("fetchUser"))
 func fetchUser() async throws {
+    // Replay intercepts HTTP request and returns a prerecorded response
     let (data, _) = try await URLSession.shared.data(
         from: URL(string: "https://api.example.com/users/42")!
     )
@@ -62,6 +28,8 @@ func fetchUser() async throws {
     #expect(user.id == 42)
 }
 ```
+
+The `.replay("fetchUser")` trait loads responses from `Replays/fetchUser.har`.
 
 <details>
 <summary><code>fetchUser.har</code> contents</summary>
@@ -121,7 +89,7 @@ func fetchUser() async throws {
 
 </details>
 
-Replay can also run **without** a HAR file by using in-memory stubs:
+Replay can also stub responses inline:
 
 ```swift
 import Foundation
@@ -141,6 +109,7 @@ import Replay
     )
 )
 func fetchGreeting() async throws {
+    // Replay intercepts HTTP request and returns the stubbed response
     let (data, _) = try await URLSession.shared.data(
         from: URL(string: "https://example.com/greeting")!
     )
@@ -148,9 +117,42 @@ func fetchGreeting() async throws {
 }
 ```
 
+## Requirements
+
+- Swift 6.1+
+- macOS 14+ / iOS 17+ / tvOS 17+ / watchOS 10+ / visionOS 1+
+
+## Installation
+
+### Swift Package Manager
+
+Add to your `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/mattt/Replay.git", branch: "main")
+]
+```
+
+Then add `Replay` to your **test target** dependencies:
+
+```swift
+.testTarget(
+    name: "YourTests",
+    dependencies: [
+        .product(name: "Replay", package: "Replay")
+    ]
+)
+```
+
+### Xcode
+
+1. Add the package: **File → Add Packages…**
+2. Add **Replay** to your **test target**.
+
 ## Getting Started
 
-### 1. Design your HTTP client to accept a session (optional)
+### 0. Design your HTTP client to accept a session (optional)
 
 Replay can intercept `URLSession.shared` globally,
 but accepting a `URLSession` parameter enables parallel test execution
@@ -187,7 +189,7 @@ actor ExampleAPIClient {
 }
 ```
 
-### 2. Add a `Replays/` folder to your test target
+### 1. Add a `Replays/` folder to your test target
 
 Replay loads archives named `Replays/<name>.har`.
 
@@ -248,7 +250,7 @@ private final class TestBundleToken {}
 struct YourSuite { /* ... */ }
 ```
 
-### 3. Write a test using `.replay("…")`
+### 2. Write a test using `.replay("…")`
 
 ```swift
 import Foundation
@@ -266,7 +268,7 @@ struct YourSuite {
 }
 ```
 
-### 4. Run tests
+### 3. Run tests
 
 The first run fails if the HAR file doesn't exist yet—this is intentional
 to prevent accidental recording.
@@ -298,7 +300,7 @@ Options:
 
 ```
 
-### 5. Record
+### 4. Record
 
 ```bash
 REPLAY_MODE=record swift test --filter YourSuite.fetchUser
@@ -309,23 +311,23 @@ This creates `Replays/fetchUser.har`.
 > [!TIP]
 > To run tests against a live API without recording, use `REPLAY_MODE=live`.
 
-### 6. Re-run
+### 5. Re-run
 
 ```console
 $ swift test
 ✅  Test fetchUser() passed after 0.001 seconds.
 ```
 
-### 7. Commit fixtures
+### 6. Commit fixtures
+
+Replay can redact while recording using filters (recommended)
+or you can filter an existing HAR file using the plugin (see Tooling).
 
 > [!WARNING]
 > HAR files may contain sensitive data (cookies, auth headers, tokens, PII).
 > Always review/redact before committing to source control.
 
-Replay can redact while recording using filters (recommended)
-or you can filter an existing HAR file using the plugin (see Tooling).
-
-## Common patterns and recipes
+## Usage
 
 ### Matching strategies
 
@@ -339,7 +341,8 @@ use a looser matching strategy:
 func fetchUser() async throws { /* ... */ }
 ```
 
-Matchers compose with `AND` semantics—all must match for an entry to be selected.
+Matchers compose with `AND` semantics;
+all must match for an entry to be selected.
 
 | Matcher | Matches on |
 |---------|------------|
@@ -463,9 +466,6 @@ try HAR.save(archive, to: outputURL)
 
 Replay includes a Swift Package Manager command plugin to help manage HAR archives.
 
-> [!NOTE]
-> Add `--allow-writing-to-package-directory` to commands to skip confirmation step.
-
 ```bash
 # Check status of archives (age, orphans, etc.)
 swift package replay status
@@ -486,6 +486,9 @@ swift package replay validate Tests/YourTests/Replays/fetchUser.har
 # Filter sensitive data from an existing HAR
 swift package replay filter input.har output.har --headers Authorization --query-params token
 ```
+
+> [!NOTE]
+> Add `--allow-writing-to-package-directory` to commands to skip confirmation step.
 
 ## Troubleshooting
 
