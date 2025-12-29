@@ -43,5 +43,8 @@ jobs:
       - name: Build
         run: swift build -v
 
+      - name: Smoke test plugin
+        run: swift package plugin --allow-writing-to-package-directory replay --help
+
       - name: Test
         run: swift test -v
