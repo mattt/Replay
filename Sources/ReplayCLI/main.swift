@@ -2,7 +2,6 @@ import ArgumentParser
 import Foundation
 import Replay
 
-@main
 struct ReplayCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "replay",
@@ -16,3 +15,14 @@ struct ReplayCommand: AsyncParsableCommand {
         ]
     )
 }
+
+func main() {
+    let semaphore = DispatchSemaphore(value: 0)
+    Task {
+        await ReplayCommand.main()
+        semaphore.signal()
+    }
+    semaphore.wait()
+}
+
+main()
