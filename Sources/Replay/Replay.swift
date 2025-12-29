@@ -1,11 +1,5 @@
 import Foundation
 
-private func replayEnv(_ key: String) -> String? {
-    ProcessInfo.processInfo.environment[key]?
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-}
-
 /// Namespace for URLSession-related helpers used with Replay.
 public enum Replay {
     /// Controls fixture recording behavior for tests and tooling.
@@ -29,7 +23,7 @@ public enum Replay {
         ///   Valid values for `REPLAY_RECORD_MODE`: `none`, `once`, `rewrite`.
         ///   If `REPLAY_RECORD_MODE` is not set, returns `.none`.
         public static func fromEnvironment() throws -> RecordMode {
-            guard let modeString = replayEnv("REPLAY_RECORD_MODE") else {
+            guard let modeString = env("REPLAY_RECORD_MODE") else {
                 return .none
             }
 
@@ -62,7 +56,7 @@ public enum Replay {
         ///   Valid values for `REPLAY_PLAYBACK_MODE`: `strict`, `passthrough`, `live`.
         ///   If `REPLAY_PLAYBACK_MODE` is not set, returns `.strict`.
         public static func fromEnvironment() throws -> PlaybackMode {
-            guard let value = replayEnv("REPLAY_PLAYBACK_MODE") else {
+            guard let value = env("REPLAY_PLAYBACK_MODE") else {
                 return .strict
             }
 
@@ -127,4 +121,12 @@ public enum Replay {
 
         return URLSession(configuration: config)
     }
+}
+
+// MARK: -
+
+private func env(_ key: String) -> String? {
+    ProcessInfo.processInfo.environment[key]?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
 }
