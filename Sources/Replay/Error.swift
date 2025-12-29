@@ -7,7 +7,7 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
     /// Replay has not been configured (e.g. PlaybackStore missing configuration).
     case notConfigured
 
-    /// Invalid recording mode value in environment variable.
+    /// Invalid replay environment value.
     case invalidRecordingMode(String)
 
     // MARK: - Validation Errors
@@ -48,9 +48,11 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
 
         case .invalidRecordingMode(let value):
             return """
-                Invalid recording mode: "\(value)"
+                Invalid Replay configuration value: "\(value)"
 
-                Valid values for REPLAY_MODE are: playback, record, live
+                Valid values for:
+                  REPLAY_RECORD_MODE: none, once, rewrite
+                  REPLAY_PLAYBACK_MODE: strict, passthrough, live
                 """
 
         case .invalidRequest(let reason):
@@ -98,11 +100,11 @@ public enum ReplayError: Error, Sendable, CustomStringConvertible, LocalizedErro
                 This request was not found in the replay archive.
 
                 Options:
-                1. Run against the live network (skip replay + no recording):
-                   REPLAY_MODE=live swift test --filter <test-name>
+                1. Run against the live network (ignore fixtures):
+                   REPLAY_PLAYBACK_MODE=live swift test --filter <test-name>
 
-                2. Update the archive with new requests:
-                   REPLAY_MODE=record swift test --filter <test-name>
+                2. Rewrite the archive from scratch:
+                   REPLAY_RECORD_MODE=rewrite swift test --filter <test-name>
 
                 3. Check if request details changed (URL, method, headers)
                    and update test expectations

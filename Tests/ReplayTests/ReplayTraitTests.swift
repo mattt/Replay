@@ -30,7 +30,8 @@ struct ReplayTraitTests {
 
         let config = PlaybackConfiguration(
             source: .entries([entry]),
-            mode: .strict,
+            playbackMode: .strict,
+            recordMode: .none,
             matchers: .default
         )
 
@@ -57,7 +58,8 @@ struct ReplayTraitTests {
 
         let config = PlaybackConfiguration(
             source: .entries([entry]),
-            mode: .strict,
+            playbackMode: .strict,
+            recordMode: .none,
             matchers: .default
         )
 
@@ -157,10 +159,10 @@ struct ReplayTraitTests {
         #expect(queryParam?.value == "test")
     }
 
-    @Test("RecordingMode respects environment")
+    @Test("Replay.RecordMode respects environment")
     func recordingModeRespectsEnvironment() throws {
-        let mode = try RecordingMode.fromEnvironment()
-        #expect(mode == .playback || mode == .record || mode == .live)
+        let mode = try Replay.RecordMode.fromEnvironment()
+        #expect(mode == .none || mode == .once || mode == .rewrite)
     }
 
     @Test("Archive name without .har suffix works")

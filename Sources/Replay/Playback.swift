@@ -66,20 +66,24 @@ public enum ReplayScope: Sendable {
 ///
 /// Use this type with `Playback.session(configuration:baseConfiguration:)`
 /// or with `PlaybackStore.configure(_:)` to control:
-/// - The replay source (HAR file, log, entries, or stubs)
-/// - The replay mode (strict, passthrough, record)
+/// - The replay source (HAR file, entries, or stubs)
+/// - The playback behavior (strict, passthrough, live)
+/// - The recording policy (none, once, rewrite)
 /// - The matching and filtering strategy
 public struct PlaybackConfiguration: Sendable {
     /// The source of recorded traffic to replay.
     public let source: Source
 
-    /// The replay mode.
-    public let mode: Mode
+    /// How recorded entries are used (and whether the network is allowed).
+    public let playbackMode: Replay.PlaybackMode
+
+    /// Whether fixtures should be recorded, and if so, how.
+    public let recordMode: Replay.RecordMode
 
     /// Matchers used to match incoming requests to recorded entries.
     public let matchers: [Matcher]
 
-    /// Filters applied to entries as they are recorded in `.record` mode.
+    /// Filters applied to entries as they are recorded.
     public let filters: [Filter]
 
     /// A source of recorded traffic for playback.
@@ -87,41 +91,33 @@ public struct PlaybackConfiguration: Sendable {
         /// Loads entries from a HAR file.
         case file(URL)
 
-        /// Uses entries from an in-memory HAR log.
-        case log(HAR.Log)
-
         /// Uses the provided entries directly.
+        ///
+        /// This is useful for tests or tools that construct `HAR.Entry` values programmatically.
         case entries([HAR.Entry])
 
         /// Uses stubs converted to HAR entries.
         case stubs([Stub])
     }
 
-    /// A playback mode.
-    public enum Mode: Sendable {
-        /// Replay from archive; throw error on no match.
-        case strict
-        /// Replay from archive; pass through to network on no match.
-        case passthrough
-        /// Replay from archive; record new requests and append to archive.
-        case record
-    }
-
     /// Creates a playback configuration.
     ///
     /// - Parameters:
     ///   - source: The replay source.
-    ///   - mode: The replay mode.
+    ///   - playbackMode: How recorded entries are used and whether the network is allowed.
+    ///   - recordMode: Whether and how to record fixtures.
     ///   - matchers: Matchers used to match incoming requests to entries.
-    ///   - filters: Filters applied to newly recorded entries in `.record` mode.
+    ///   - filters: Filters applied to newly recorded entries.
     public init(
         source: Source,
-        mode: Mode = .strict,
+        playbackMode: Replay.PlaybackMode = .strict,
+        recordMode: Replay.RecordMode = .none,
         matchers: [Matcher] = .default,
         filters: [Filter] = []
     ) {
         self.source = source
-        self.mode = mode
+        self.playbackMode = playbackMode
+        self.recordMode = recordMode
         self.matchers = matchers
         self.filters = filters
     }
@@ -204,6 +200,8 @@ public actor PlaybackStore {
 
     private var configuration: PlaybackConfiguration?
     private var entries: [HAR.Entry] = []
+    private var recordingEnabled: Bool = false
+    private var effectivePlaybackMode: Replay.PlaybackMode = .strict
 
     /// Configures the store for playback.
     ///
@@ -211,33 +209,43 @@ public actor PlaybackStore {
     /// - Throws: Any error thrown while loading the configured source.
     public func configure(_ config: PlaybackConfiguration) async throws {
         configuration = config
+        recordingEnabled = false
+        effectivePlaybackMode = config.playbackMode
 
         switch config.source {
         case .file(let url):
+            if config.recordMode == .rewrite, FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
             do {
                 let log = try HAR.load(from: url)
                 entries = log.entries
+                // Match pytest-recording semantics: when a fixture exists, `once` does not permit
+                // extending it and does not allow network fallback.
+                if config.recordMode == .once {
+                    effectivePlaybackMode = .strict
+                    recordingEnabled = false
+                }
             } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-                switch config.mode {
-                case .record, .passthrough:
-                    entries = []
-                case .strict:
+                entries = []
+                recordingEnabled = config.recordMode != .none
+
+                if !recordingEnabled, config.playbackMode == .strict {
                     throw ReplayError.archiveNotFound(url)
                 }
             } catch {
                 throw error
             }
 
-        case .log(let log):
-            entries = log.entries
-
         case .entries(let provided):
             entries = provided
+            recordingEnabled = false
 
         case .stubs(let stubs):
             entries = try stubs.map { stub in
                 try makeEntry(from: stub)
             }
+            recordingEnabled = false
         }
     }
 
@@ -248,14 +256,11 @@ public actor PlaybackStore {
 
     /// Handles a URL request using the current playback configuration.
     ///
-    /// In `.strict` mode,
-    /// this method throws when no matching entry is found.
-    /// In `.passthrough` mode,
-    /// this method performs the request against the live network.
-    /// In `.record` mode,
-    /// this method performs the request,
-    /// records the result,
-    /// and appends it to the configured archive when applicable.
+    /// In `.strict` playback mode, this method throws when no matching entry is found.
+    /// In `.passthrough` playback mode, this method falls back to the live network on no match.
+    /// In `.live` playback mode, this method always performs the request against the live network.
+    ///
+    /// Recording is controlled independently via `recordMode`.
     ///
     /// - Parameter request: The request to handle.
     /// - Returns: A tuple of `HTTPURLResponse` and body `Data`.
@@ -264,12 +269,14 @@ public actor PlaybackStore {
             throw ReplayError.notConfigured
         }
 
-        if let entry = config.matchers.firstMatch(for: request, in: entries) {
+        // `.live` ignores any recorded entries and always hits the network.
+        if effectivePlaybackMode != .live,
+            let entry = config.matchers.firstMatch(for: request, in: entries)
+        {
             return try entry.toURLResponse()
         }
 
-        switch config.mode {
-        case .strict:
+        if effectivePlaybackMode == .strict, !recordingEnabled {
             // Use different error for stubs vs HAR archives
             if case .stubs(let stubs) = config.source {
                 let availableStubs = stubs.map { stub in
@@ -289,20 +296,15 @@ public actor PlaybackStore {
                     archivePath: archivePathDescription(for: config.source)
                 )
             }
+        }
 
-        case .passthrough:
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw ReplayError.invalidResponse
-            }
-            return (httpResponse, data)
+        let startTime = Date()
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ReplayError.invalidResponse
+        }
 
-        case .record:
-            let startTime = Date()
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                throw ReplayError.invalidResponse
-            }
+        if recordingEnabled {
             let duration = Date().timeIntervalSince(startTime)
 
             var entry = try HAR.Entry(
@@ -324,9 +326,9 @@ public actor PlaybackStore {
                 log.entries = entries
                 try HAR.save(log, to: url)
             }
-
-            return (httpResponse, data)
         }
+
+        return (httpResponse, data)
     }
 
     /// Clears the active configuration and any loaded entries.
@@ -339,8 +341,6 @@ public actor PlaybackStore {
         switch source {
         case .file(let url):
             return url.path
-        case .log:
-            return "<in-memory-log>"
         case .entries:
             return "<entries-array>"
         case .stubs:

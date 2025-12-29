@@ -1,40 +1,5 @@
 import Foundation
 
-/// Determines how Replay should behave in tests.
-public enum RecordingMode: String, Hashable, CaseIterable {
-    /// Only replay from archives (default).
-    case playback
-
-    /// Explicitly requested recording.
-    case record
-
-    /// Run tests against the live network, ignoring replay archives and without recording.
-    case live
-
-    /// Gets the recording mode from environment variables.
-    ///
-    /// - Returns: The recording mode from `REPLAY_MODE` environment variable.
-    /// - Throws: `ReplayError.invalidRecordingMode` if `REPLAY_MODE` is set to an invalid value.
-    ///
-    ///   Valid values for `REPLAY_MODE`: `playback`, `record`, `live`.
-    ///   If `REPLAY_MODE` is not set, returns `.playback`.
-    public static func fromEnvironment() throws -> RecordingMode {
-        guard
-            let modeString = ProcessInfo.processInfo.environment["REPLAY_MODE"]?.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            ).lowercased()
-        else {
-            return .playback
-        }
-
-        guard let mode = RecordingMode(rawValue: modeString) else {
-            throw ReplayError.invalidRecordingMode(modeString)
-        }
-
-        return mode
-    }
-}
-
 #if canImport(Testing)
     @_weakLinked import Testing
 
@@ -43,12 +8,14 @@ public enum RecordingMode: String, Hashable, CaseIterable {
     /// A Swift Testing trait that enables Replay for the duration of a test or suite.
     ///
     /// By default, Replay runs in playback-only mode and will fail if the archive is missing.
-    /// Recording is an explicit action, enabled via `REPLAY_MODE=record`.
+    /// Recording is an explicit action, enabled via `REPLAY_RECORD_MODE`.
     ///
-    /// To run the test against the live network (ignoring fixtures and without recording),
-    /// set `REPLAY_MODE=live`.
+    /// To run the test against the live network (ignoring fixtures),
+    /// set `REPLAY_PLAYBACK_MODE=live`.
     ///
-    /// Valid values for `REPLAY_MODE`: `playback`, `record`, `live`.
+    /// Valid values for:
+    /// - `REPLAY_RECORD_MODE`: `none`, `once`, `rewrite`
+    /// - `REPLAY_PLAYBACK_MODE`: `strict`, `passthrough`, `live`
     public struct ReplayTrait: TestTrait, SuiteTrait, TestScoping {
         private let archiveName: String?
         private let stubs: [Stub]?
@@ -117,18 +84,19 @@ public enum RecordingMode: String, Hashable, CaseIterable {
             let name = archiveName ?? generateArchiveName(for: test, testCase: testCase)
             let archiveURL = try await getArchiveURL(name: name, test: test)
 
-            let mode = try RecordingMode.fromEnvironment()
+            let recordMode = try Replay.RecordMode.fromEnvironment()
+            let playbackMode = try Replay.PlaybackMode.fromEnvironment()
             let archiveExists = FileManager.default.fileExists(atPath: archiveURL.path)
 
             let testName = test.displayName ?? test.name
 
-            if stubs == nil, !archiveExists && mode == .playback {
+            if stubs == nil, !archiveExists, recordMode == .none, playbackMode == .strict {
                 let instructions = """
-                    To record this test's HTTP traffic, run:
-                      env REPLAY_MODE=record swift test --filter \(testName)
+                    To record this test's HTTP traffic (archive missing), run:
+                      env REPLAY_RECORD_MODE=once swift test --filter \(testName)
 
-                    To run against the live network (skip replay + no recording), run:
-                      env REPLAY_MODE=live swift test --filter \(testName)
+                    To run against the live network (ignore fixtures), run:
+                      env REPLAY_PLAYBACK_MODE=live swift test --filter \(testName)
                     """
 
                 throw ReplayError.archiveMissing(
@@ -138,23 +106,11 @@ public enum RecordingMode: String, Hashable, CaseIterable {
                 )
             }
 
-            let playbackMode: PlaybackConfiguration.Mode
-            let source: PlaybackConfiguration.Source
-
-            if mode == .live {
-                // Live mode: ignore fixtures entirely, pass through to network, and do not record.
-                playbackMode = .passthrough
-                source = .entries([])
-            } else {
-                playbackMode = (stubs == nil && mode == .record) ? .record : .strict
-                source = stubs.map { .stubs($0) } ?? .file(archiveURL)
-            }
-
-            let config = PlaybackConfiguration(
-                source: source,
-                mode: playbackMode,
-                matchers: matchers,
-                filters: filters
+            let (config, didRecord) = try makePlaybackConfiguration(
+                recordMode: recordMode,
+                playbackMode: playbackMode,
+                archiveURL: archiveURL,
+                archiveExists: archiveExists
             )
 
             // Register URLProtocol globally for zero-config interception.
@@ -168,7 +124,7 @@ public enum RecordingMode: String, Hashable, CaseIterable {
 
             try await function()
 
-            if mode == .record {
+            if didRecord {
                 print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
         }
@@ -181,18 +137,19 @@ public enum RecordingMode: String, Hashable, CaseIterable {
             let name = archiveName ?? generateArchiveName(for: test, testCase: testCase)
             let archiveURL = try await getArchiveURL(name: name, test: test)
 
-            let mode = try RecordingMode.fromEnvironment()
+            let recordMode = try Replay.RecordMode.fromEnvironment()
+            let playbackMode = try Replay.PlaybackMode.fromEnvironment()
             let archiveExists = FileManager.default.fileExists(atPath: archiveURL.path)
 
             let testName = test.displayName ?? test.name
 
-            if stubs == nil, !archiveExists && mode == .playback {
+            if stubs == nil, !archiveExists, recordMode == .none, playbackMode == .strict {
                 let instructions = """
-                    To record this test's HTTP traffic, run:
-                      env REPLAY_MODE=record swift test --filter \(testName)
+                    To record this test's HTTP traffic (archive missing), run:
+                      env REPLAY_RECORD_MODE=once swift test --filter \(testName)
 
-                    To run against the live network (skip replay + no recording), run:
-                      env REPLAY_MODE=live swift test --filter \(testName)
+                    To run against the live network (ignore fixtures), run:
+                      env REPLAY_PLAYBACK_MODE=live swift test --filter \(testName)
                     """
 
                 throw ReplayError.archiveMissing(
@@ -202,22 +159,11 @@ public enum RecordingMode: String, Hashable, CaseIterable {
                 )
             }
 
-            let playbackMode: PlaybackConfiguration.Mode
-            let source: PlaybackConfiguration.Source
-
-            if mode == .live {
-                playbackMode = .passthrough
-                source = .entries([])
-            } else {
-                playbackMode = (stubs == nil && mode == .record) ? .record : .strict
-                source = stubs.map { .stubs($0) } ?? .file(archiveURL)
-            }
-
-            let config = PlaybackConfiguration(
-                source: source,
-                mode: playbackMode,
-                matchers: matchers,
-                filters: filters
+            let (config, didRecord) = try makePlaybackConfiguration(
+                recordMode: recordMode,
+                playbackMode: playbackMode,
+                archiveURL: archiveURL,
+                archiveExists: archiveExists
             )
 
             let localStore = PlaybackStore()
@@ -233,9 +179,51 @@ public enum RecordingMode: String, Hashable, CaseIterable {
                 try await function()
             }
 
-            if mode == .record {
+            if didRecord {
                 print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
+        }
+
+        private func makePlaybackConfiguration(
+            recordMode: Replay.RecordMode,
+            playbackMode: Replay.PlaybackMode,
+            archiveURL: URL,
+            archiveExists: Bool
+        ) throws -> (PlaybackConfiguration, didRecord: Bool) {
+            // Stubs are always deterministic; ignore environment modes.
+            if let stubs {
+                return (
+                    PlaybackConfiguration(
+                        source: .stubs(stubs),
+                        playbackMode: .strict,
+                        recordMode: .none,
+                        matchers: matchers,
+                        filters: filters
+                    ),
+                    false
+                )
+            }
+
+            let didRecord: Bool =
+                switch recordMode {
+                case .none:
+                    false
+                case .once:
+                    !archiveExists
+                case .rewrite:
+                    true
+                }
+
+            return (
+                PlaybackConfiguration(
+                    source: .file(archiveURL),
+                    playbackMode: playbackMode,
+                    recordMode: recordMode,
+                    matchers: matchers,
+                    filters: filters
+                ),
+                didRecord
+            )
         }
 
         private func generateArchiveName(for test: Test, testCase: Test.Case?) -> String {
@@ -286,7 +274,7 @@ public enum RecordingMode: String, Hashable, CaseIterable {
                             .appendingPathComponent("\(normalizedName).har")
 
                         // If recording, use this source-relative path
-                        if (try? RecordingMode.fromEnvironment()) == .record {
+                        if (try? Replay.RecordMode.fromEnvironment()) != Replay.RecordMode.none {
                             try? FileManager.default.createDirectory(
                                 at: archiveURL.deletingLastPathComponent(),
                                 withIntermediateDirectories: true
@@ -315,7 +303,7 @@ public enum RecordingMode: String, Hashable, CaseIterable {
 
             // 4. Fallback to CWD/directory (Old behavior, mostly for Linux or when sourceLocation is missing)
             let cwdURL = URL(fileURLWithPath: directory)
-            if (try? RecordingMode.fromEnvironment()) == .record {
+            if (try? Replay.RecordMode.fromEnvironment()) != Replay.RecordMode.none {
                 try? FileManager.default.createDirectory(
                     at: cwdURL, withIntermediateDirectories: true)
             }

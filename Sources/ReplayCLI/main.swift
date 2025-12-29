@@ -293,7 +293,7 @@ struct ReplayCommand: AsyncParsableCommand {
                 filter,
             ]
             var env = ProcessInfo.processInfo.environment
-            env["REPLAY_MODE"] = "record"
+            env["REPLAY_RECORD_MODE"] = force ? "rewrite" : "once"
             process.environment = env
 
             try process.run()

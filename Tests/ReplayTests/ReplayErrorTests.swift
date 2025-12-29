@@ -22,9 +22,9 @@ struct ReplayErrorTests {
         func invalidRecordingMode() {
             let error = ReplayError.invalidRecordingMode("invalid-mode")
 
-            #expect(error.description.contains("Invalid recording mode"))
+            #expect(error.description.contains("Invalid Replay configuration"))
             #expect(error.description.contains("invalid-mode"))
-            #expect(error.description.contains("playback, record, live"))
+            #expect(error.description.contains("REPLAY_RECORD_MODE: none, once, rewrite"))
         }
 
         @Test("noMatchingEntry error")
@@ -117,13 +117,13 @@ struct ReplayErrorTests {
             let error = ReplayError.archiveMissing(
                 path: url,
                 testName: "testUserAuthentication",
-                instructions: "Run env REPLAY_MODE=record swift test --filter testUserAuthentication"
+                instructions: "Run env REPLAY_RECORD_MODE=once swift test --filter testUserAuthentication"
             )
 
             #expect(error.description.contains("Archive Missing"))
             #expect(error.description.contains("/tests/fixtures/test.har"))
             #expect(error.description.contains("testUserAuthentication"))
-            #expect(error.description.contains("REPLAY_MODE=record"))
+            #expect(error.description.contains("REPLAY_RECORD_MODE=once"))
         }
     }
 

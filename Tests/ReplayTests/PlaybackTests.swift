@@ -5,6 +5,41 @@ import Testing
 
 @Suite("Playback Tests", .serialized)
 struct PlaybackTests {
+    private final class NetworkStubURLProtocol: URLProtocol {
+        // Test-only shared state.
+        // Safe here because the enclosing suite is `.serialized` and access is deterministic.
+        nonisolated(unsafe) static var response: (status: Int, body: Data) = (200, Data())
+
+        override class func canInit(with request: URLRequest) -> Bool {
+            request.url?.host == "network-stub.example"
+        }
+
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+            request
+        }
+
+        override func startLoading() {
+            guard let url = request.url else {
+                client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+                return
+            }
+
+            let stub = Self.response
+            let headers = ["Content-Type": "text/plain"]
+            let httpResponse = HTTPURLResponse(
+                url: url,
+                statusCode: stub.status,
+                httpVersion: "HTTP/1.1",
+                headerFields: headers
+            )!
+
+            client?.urlProtocol(self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: stub.body)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+
+        override func stopLoading() {}
+    }
 
     // MARK: - ReplayScope Tests
 
@@ -47,18 +82,6 @@ struct PlaybackTests {
             }
         }
 
-        @Test("log source holds HAR.Log")
-        func logSource() {
-            let log = HAR.create()
-            let source: PlaybackConfiguration.Source = .log(log)
-
-            if case .log(let storedLog) = source {
-                #expect(storedLog.version == "1.2")
-            } else {
-                Issue.record("Expected .log source")
-            }
-        }
-
         @Test("entries source holds HAR.Entry array")
         func entriesSource() {
             let entries = [makeTestEntry()]
@@ -84,29 +107,6 @@ struct PlaybackTests {
         }
     }
 
-    // MARK: - PlaybackConfiguration.Mode Tests
-
-    @Suite("PlaybackConfiguration.Mode Tests")
-    struct ModeTests {
-        @Test("strict mode exists")
-        func strictMode() {
-            let mode: PlaybackConfiguration.Mode = .strict
-            #expect(mode == .strict)
-        }
-
-        @Test("passthrough mode exists")
-        func passthroughMode() {
-            let mode: PlaybackConfiguration.Mode = .passthrough
-            #expect(mode == .passthrough)
-        }
-
-        @Test("record mode exists")
-        func recordMode() {
-            let mode: PlaybackConfiguration.Mode = .record
-            #expect(mode == .record)
-        }
-    }
-
     // MARK: - PlaybackConfiguration Tests
 
     @Suite("PlaybackConfiguration Tests")
@@ -121,27 +121,29 @@ struct PlaybackTests {
             } else {
                 Issue.record("Expected .stubs source")
             }
-            #expect(config.mode == .strict)
+            #expect(config.playbackMode == .strict)
+            #expect(config.recordMode == .none)
             #expect(config.matchers.isEmpty == false)
             #expect(config.filters.isEmpty)
         }
 
         @Test("initializes with all parameters")
         func initWithAllParameters() {
-            let log = HAR.create()
             let config = PlaybackConfiguration(
-                source: .log(log),
-                mode: .passthrough,
+                source: .entries([makeTestEntry()]),
+                playbackMode: .passthrough,
+                recordMode: .none,
                 matchers: [],
                 filters: []
             )
 
-            if case .log = config.source {
+            if case .entries = config.source {
                 #expect(Bool(true))
             } else {
-                Issue.record("Expected .log source")
+                Issue.record("Expected .entries source")
             }
-            #expect(config.mode == .passthrough)
+            #expect(config.playbackMode == .passthrough)
+            #expect(config.recordMode == .none)
             #expect(config.matchers.isEmpty)
             #expect(config.filters.isEmpty)
         }
@@ -150,11 +152,12 @@ struct PlaybackTests {
         func sendable() async {
             let config = PlaybackConfiguration(
                 source: .stubs([.get("https://example.com", 200, ["Content-Type": "text/plain"], { "Success" })]),
-                mode: .strict
+                playbackMode: .strict,
+                recordMode: .none
             )
 
             await Task.detached {
-                _ = config.mode
+                _ = config.playbackMode
             }.value
         }
     }
@@ -211,14 +214,12 @@ struct PlaybackTests {
         }
 
         @Test("configure with log populates entries")
-        func configureWithLog() async throws {
+        func configureWithLog_populatesEntries_removedCase() async throws {
+            // `.log` was removed pre-1.0; use `.entries(log.entries)` instead.
             let store = PlaybackStore()
-            var log = HAR.create()
-            log.entries = [makeTestEntry()]
-
-            try await store.configure(PlaybackConfiguration(source: .log(log)))
+            let entry = makeTestEntry()
+            try await store.configure(PlaybackConfiguration(source: .entries([entry])))
             let entries = await store.getAvailableEntries()
-
             #expect(entries.count == 1)
         }
 
@@ -228,16 +229,28 @@ struct PlaybackTests {
             let url = URL(fileURLWithPath: "/tmp/replay-missing-\(UUID().uuidString).har")
 
             await #expect(throws: Error.self) {
-                try await store.configure(PlaybackConfiguration(source: .file(url), mode: .strict))
+                try await store.configure(
+                    PlaybackConfiguration(
+                        source: .file(url),
+                        playbackMode: .strict,
+                        recordMode: .none
+                    )
+                )
             }
         }
 
-        @Test("configure with missing file succeeds in record mode")
-        func configureWithMissingFileRecordSucceeds() async throws {
+        @Test("configure with missing file succeeds when recording is enabled")
+        func configureWithMissingFileRecordingSucceeds() async throws {
             let store = PlaybackStore()
             let url = URL(fileURLWithPath: "/tmp/replay-missing-\(UUID().uuidString).har")
 
-            try await store.configure(PlaybackConfiguration(source: .file(url), mode: .record))
+            try await store.configure(
+                PlaybackConfiguration(
+                    source: .file(url),
+                    playbackMode: .strict,
+                    recordMode: .once
+                )
+            )
             #expect(await store.getAvailableEntries().isEmpty)
         }
 
@@ -285,7 +298,13 @@ struct PlaybackTests {
             let store = PlaybackStore()
             let stubs: [Stub] = [.get("https://example.com/api", 200, ["Content-Type": "text/plain"], { "Success" })]
 
-            try await store.configure(PlaybackConfiguration(source: .stubs(stubs), mode: .strict))
+            try await store.configure(
+                PlaybackConfiguration(
+                    source: .stubs(stubs),
+                    playbackMode: .strict,
+                    recordMode: .none
+                )
+            )
 
             let request = URLRequest(url: URL(string: "https://different.com")!)
 
@@ -550,14 +569,14 @@ struct PlaybackTests {
             #expect(String(data: data, encoding: .utf8) == "Created")
         }
 
-        @Test("log-based store returns correct response")
-        func logBasedStore() async throws {
+        @Test("entries-based store returns correct response (from log entries)")
+        func entriesBasedStore_fromLogEntries() async throws {
             let store = PlaybackStore()
             let url = URL(string: "https://api.example.com/status")!
             var log = HAR.create()
             log.entries = [makeTestEntryFor(url: url, status: 204, body: "")]
 
-            try await store.configure(PlaybackConfiguration(source: .log(log)))
+            try await store.configure(PlaybackConfiguration(source: .entries(log.entries)))
 
             var request = URLRequest(url: url)
             request.httpMethod = "GET"
@@ -565,6 +584,32 @@ struct PlaybackTests {
             let (response, _) = try await store.handleRequest(request)
 
             #expect(response.statusCode == 204)
+        }
+
+        @Test("live mode ignores recorded entries and always hits the network")
+        func liveModeIgnoresEntries() async throws {
+            URLProtocol.registerClass(NetworkStubURLProtocol.self)
+            defer { URLProtocol.unregisterClass(NetworkStubURLProtocol.self) }
+
+            NetworkStubURLProtocol.response = (status: 204, body: Data())
+
+            let store = PlaybackStore()
+            let url = URL(string: "https://network-stub.example/status")!
+            let matchingEntry = makeTestEntryFor(url: url, status: 200, body: "fixture")
+
+            try await store.configure(
+                PlaybackConfiguration(
+                    source: .entries([matchingEntry]),
+                    playbackMode: .live,
+                    recordMode: .none
+                )
+            )
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+
+            let (response, _) = try await store.handleRequest(request)
+            #expect(response.statusCode == 204)  // from NetworkStubURLProtocol, not fixture
         }
 
         @Test("multiple stubs match by URL")
@@ -596,7 +641,13 @@ struct PlaybackTests {
             let store = PlaybackStore()
             let stubs: [Stub] = [.get("https://expected.com", 200, ["Content-Type": "text/plain"], { "Success" })]
 
-            try await store.configure(PlaybackConfiguration(source: .stubs(stubs), mode: .strict))
+            try await store.configure(
+                PlaybackConfiguration(
+                    source: .stubs(stubs),
+                    playbackMode: .strict,
+                    recordMode: .none
+                )
+            )
 
             let request = URLRequest(url: URL(string: "https://unexpected.com")!)
 

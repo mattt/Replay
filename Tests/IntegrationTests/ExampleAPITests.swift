@@ -65,7 +65,7 @@ actor ExampleAPIClient {
 ///
 /// To record new fixtures for real APIs:
 /// ```
-/// env REPLAY_MODE=record swift test --filter ExampleAPITests
+/// env REPLAY_RECORD_MODE=rewrite swift test --filter ExampleAPITests
 /// ```
 @Suite("Example API Tests", .serialized, .playbackIsolated(replaysFrom: Bundle.module))
 struct ExampleAPITests {
@@ -163,13 +163,21 @@ struct ExampleAPITests {
     func missingArchiveError() async throws {
         // Force playback mode so this test is stable even when the overall test run
         // is configured for recording or live network.
-        let previous = getenv("REPLAY_MODE").map { String(cString: $0) }
-        setenv("REPLAY_MODE", "playback", 1)
+        let previousRecord = getenv("REPLAY_RECORD_MODE").map { String(cString: $0) }
+        let previousPlayback = getenv("REPLAY_PLAYBACK_MODE").map { String(cString: $0) }
+        setenv("REPLAY_RECORD_MODE", "none", 1)
+        setenv("REPLAY_PLAYBACK_MODE", "strict", 1)
         defer {
-            if let previous {
-                setenv("REPLAY_MODE", previous, 1)
+            if let previousRecord {
+                setenv("REPLAY_RECORD_MODE", previousRecord, 1)
             } else {
-                unsetenv("REPLAY_MODE")
+                unsetenv("REPLAY_RECORD_MODE")
+            }
+
+            if let previousPlayback {
+                setenv("REPLAY_PLAYBACK_MODE", previousPlayback, 1)
+            } else {
+                unsetenv("REPLAY_PLAYBACK_MODE")
             }
         }
 
@@ -185,7 +193,7 @@ struct ExampleAPITests {
         } catch let error as ReplayError {
             let description = error.description
             #expect(description.contains("Replay Archive Missing"))
-            #expect(description.contains("REPLAY_MODE=record"))
+            #expect(description.contains("REPLAY_RECORD_MODE=once"))
         }
     }
 
@@ -214,7 +222,8 @@ struct ExampleAPITests {
 
         let config = PlaybackConfiguration(
             source: .entries([entry]),
-            mode: .strict,
+            playbackMode: .strict,
+            recordMode: .none,
             matchers: .default
         )
 

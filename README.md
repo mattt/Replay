@@ -4,6 +4,9 @@ HTTP recording, playback, and stubbing for Swift,
 built around <a href="https://en.wikipedia.org/wiki/HAR_(file_format)"><abbr title="HTTP Archive">HAR</abbr> fixtures</a>
 and [Swift Testing traits](https://developer.apple.com/documentation/testing/traits).
 
+Inspired by Ruby's [VCR](https://github.com/vcr/vcr) and 
+Python's [VCR.py](https://github.com/kevin1024/vcrpy) / [pytest-recording](https://github.com/kiwicom/pytest-recording).
+
 Add the `.replay` trait to a `@Test` declaration to specify a HAR file
 containing prerecorded HTTP responses:
 
@@ -273,6 +276,17 @@ struct YourSuite {
 The first run fails if the HAR file doesn't exist yet—this is intentional
 to prevent accidental recording.
 
+Replay uses two environment variables to control behavior:
+
+- **`REPLAY_RECORD_MODE`** (default: `none`)
+  - `none`: never record
+  - `once`: record only if the archive is missing
+  - `rewrite`: rewrite the archive from scratch
+- **`REPLAY_PLAYBACK_MODE`** (default: `strict`)
+  - `strict`: require fixtures; fail if missing/unmatched
+  - `passthrough`: use fixtures when available; otherwise hit the network
+  - `live`: ignore fixtures and always hit the network
+
 ```console
 $ swift test
 ❌  Test fetchUser() recorded an issue at ExampleTests.swift
@@ -286,11 +300,11 @@ Archive: /path/to/.../Replays/fetchUser.har
 This request was not found in the replay archive.
 
 Options:
-1. Run against the live network (skip replay + no recording):
-   REPLAY_MODE=live swift test --filter <test-name>
+1. Run against the live network (ignore fixtures):
+   REPLAY_PLAYBACK_MODE=live swift test --filter <test-name>
 
-2. Update the archive with new requests:
-   REPLAY_MODE=record swift test --filter <test-name>
+2. Rewrite the archive from scratch:
+   REPLAY_RECORD_MODE=rewrite swift test --filter <test-name>
 
 3. Check if request details changed (URL, method, headers)
    and update test expectations
@@ -303,13 +317,13 @@ Options:
 ### 4. Record
 
 ```bash
-REPLAY_MODE=record swift test --filter YourSuite.fetchUser
+REPLAY_RECORD_MODE=once swift test --filter YourSuite.fetchUser
 ```
 
 This creates `Replays/fetchUser.har`.
 
 > [!TIP]
-> To run tests against a live API without recording, use `REPLAY_MODE=live`.
+> To run tests against a live API (ignoring fixtures), use `REPLAY_PLAYBACK_MODE=live`.
 
 ### 5. Re-run
 
@@ -448,7 +462,8 @@ For XCTest or manual control, use the lower-level APIs directly:
 // Playback from a HAR file
 let config = PlaybackConfiguration(
     source: .file(archiveURL),
-    mode: .strict,  // or .passthrough, .record
+    playbackMode: .strict,  // or .passthrough, .live
+    recordMode: .none,      // or .once, .rewrite
     matchers: [.method, .path]
 )
 let session = try await Playback.session(configuration: config)
@@ -470,7 +485,7 @@ Replay includes a Swift Package Manager command plugin to help manage HAR archiv
 # Check status of archives (age, orphans, etc.)
 swift package replay status
 
-# Record specific tests (runs `swift test --filter …` with `REPLAY_MODE=record`)
+# Record specific tests (runs `swift test --filter …` with `REPLAY_RECORD_MODE=once` or `rewrite`)
 swift package replay record ExampleAPITests.fetchUser
 
 # Note: The archive name and location come from your `@Test(.replay("…"))`
@@ -498,7 +513,7 @@ This is expected on first run (unless you've already created `Replays/<name>.har
 Record intentionally for the failing test:
 
 ```bash
-REPLAY_MODE=record swift test --filter <your-test-name>
+REPLAY_RECORD_MODE=rewrite swift test --filter <your-test-name>
 ```
 
 ### “No Matching Entry in Archive”
