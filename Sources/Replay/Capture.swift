@@ -144,9 +144,12 @@ public final class CaptureURLProtocol: URLProtocol {
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
         let session = URLSession.shared
+        // URLSession completion handlers are strictly @Sendable in Swift 6.
+        // We use a wrapper to capture `weak self` safely without requiring Sendable conformance on Linux.
+        let weakSelf = UnsafeWeakSendable(self)
         dataTask = session.dataTask(with: mutableRequest as URLRequest) {
-            [weak self] data, response, error in
-            guard let self else { return }
+            data, response, error in
+            guard let self = weakSelf.value else { return }
 
             if let error {
                 self.client?.urlProtocol(self, didFailWithError: error)
@@ -194,16 +197,18 @@ public final class CaptureURLProtocol: URLProtocol {
 
 // Satisfy Sendable requirements for CaptureURLProtocol depending on platform.
 // On Apple platforms, URLProtocol does not conform to Sendable, so we provide conformance.
-// On Linux, URLSession completion handlers became strictly `@Sendable` in Swift 6.2,
-// and `URLProtocol` is not Sendable there, so we provide `@unchecked Sendable` conformance.
-#if canImport(FoundationNetworking)
-    #if swift(>=6.2)
-        extension CaptureURLProtocol: @unchecked Sendable {}
-    #endif
-#else
-    // Apple platforms: URLProtocol does not conform to Sendable.
+#if !canImport(FoundationNetworking)
     extension CaptureURLProtocol: @unchecked Sendable {}
 #endif
+
+/// Wrapper to send weak references to non-Sendable values across isolation boundaries.
+private struct UnsafeWeakSendable<T: AnyObject>: @unchecked Sendable {
+    weak var value: T?
+
+    init(_ value: T) {
+        self.value = value
+    }
+}
 
 // MARK: - Capture Store (Actor for thread safety)
 
