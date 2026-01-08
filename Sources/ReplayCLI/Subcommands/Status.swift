@@ -99,7 +99,7 @@ extension ReplayCommand {
             //   .replay("fetchUser", matching: [.method, .path], filters: ...)
             // This is best-effort parsing for CLI reporting.
             let pattern = #"\.replay\(\s*"([^"]+)"\s*,\s*matching:\s*([^\)]*)\)"#
-            guard let regex = try? Regex(pattern, as: (Substring, Substring, Substring).self) else { return [:] }
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [:] }
 
             var map: [String: [String]] = [:]
 
@@ -107,9 +107,16 @@ extension ReplayCommand {
                 guard url.pathExtension == "swift" else { continue }
                 guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
 
-                for match in contents.matches(of: regex) {
-                    let name = String(match.output.1)
-                    let raw = String(match.output.2)
+                let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+                let matches = regex.matches(in: contents, options: [], range: range)
+                
+                for match in matches {
+                    guard match.numberOfRanges > 2,
+                          let nameRange = Range(match.range(at: 1), in: contents),
+                          let rawRange = Range(match.range(at: 2), in: contents) else { continue }
+                    
+                    let name = String(contents[nameRange])
+                    let raw = String(contents[rawRange])
 
                     // Stop at the next argument label if present (e.g. `filters:`).
                     let trimmed: Substring

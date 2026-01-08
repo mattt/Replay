@@ -6,11 +6,11 @@ import PackageDescription
 let package = Package(
     name: "Replay",
     platforms: [
-        .macOS(.v14),
-        .macCatalyst(.v17),
-        .iOS(.v17),
-        .tvOS(.v17),
-        .watchOS(.v10),
+        .macOS(.v10_15),
+        .macCatalyst(.v13),
+        .iOS(.v13),
+        .tvOS(.v13),
+        .watchOS(.v6),
         .visionOS(.v1),
     ],
     products: [

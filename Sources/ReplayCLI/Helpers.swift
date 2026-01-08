@@ -28,14 +28,19 @@ func referencedReplayNames(in testsRoot: URL, fileManager: FileManager) -> Set<S
 
     var names: Set<String> = []
     let pattern = #"\.replay\(\s*"([^"]+)""#
-    guard let regex = try? Regex(pattern, as: (Substring, Substring).self) else { return [] }
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
 
     for case let url as URL in enumerator {
         guard url.pathExtension == "swift" else { continue }
         guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
 
-        for match in contents.matches(of: regex) {
-            names.insert(String(match.output.1))
+        let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+        let matches = regex.matches(in: contents, options: [], range: range)
+        
+        for match in matches {
+            guard match.numberOfRanges > 1,
+                  let nameRange = Range(match.range(at: 1), in: contents) else { continue }
+            names.insert(String(contents[nameRange]))
         }
     }
 
