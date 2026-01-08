@@ -121,7 +121,7 @@ func fetchGreeting() async throws {
 ## Requirements
 
 - Swift 6.1+
-- macOS 14+ / iOS 17+ / tvOS 17+ / watchOS 10+ / visionOS 1+ / Linux
+- macOS 10.15+ / iOS 13+ / tvOS 13+ / watchOS 6+ / visionOS 1+ / Linux
 
 ## Installation
 
