@@ -107,14 +107,15 @@ extension ReplayCommand {
                 guard url.pathExtension == "swift" else { continue }
                 guard let contents = try? String(contentsOf: url, encoding: .utf8) else { continue }
 
-                let range = NSRange(contents.startIndex..<contents.endIndex, in: contents)
+                let range = NSRange(contents.startIndex ..< contents.endIndex, in: contents)
                 let matches = regex.matches(in: contents, options: [], range: range)
-                
+
                 for match in matches {
                     guard match.numberOfRanges > 2,
-                          let nameRange = Range(match.range(at: 1), in: contents),
-                          let rawRange = Range(match.range(at: 2), in: contents) else { continue }
-                    
+                        let nameRange = Range(match.range(at: 1), in: contents),
+                        let rawRange = Range(match.range(at: 2), in: contents)
+                    else { continue }
+
                     let name = String(contents[nameRange])
                     let raw = String(contents[rawRange])
 
