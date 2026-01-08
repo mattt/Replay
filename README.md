@@ -56,9 +56,7 @@ The `.replay("fetchUser")` trait loads responses from `Replays/fetchUser.har`.
           "url": "https://api.example.com/users/42",
           "httpVersion": "HTTP/1.1",
           "cookies": [],
-          "headers": [
-            { "name": "Accept", "value": "application/json" }
-          ],
+          "headers": [{ "name": "Accept", "value": "application/json" }],
           "queryString": [],
           "headersSize": -1,
           "bodySize": 0
@@ -68,9 +66,7 @@ The `.replay("fetchUser")` trait loads responses from `Replays/fetchUser.har`.
           "statusText": "OK",
           "httpVersion": "HTTP/1.1",
           "cookies": [],
-          "headers": [
-            { "name": "Content-Type", "value": "application/json" }
-          ],
+          "headers": [{ "name": "Content-Type", "value": "application/json" }],
           "content": {
             "size": 52,
             "mimeType": "application/json",
@@ -360,16 +356,16 @@ func fetchUser() async throws { /* ... */ }
 Matchers compose with `AND` semantics;
 all must match for an entry to be selected.
 
-| Matcher | Matches on |
-|---------|------------|
-| `.method` | HTTP method (case-insensitive) |
-| `.url` | Full URL string (strict) |
-| `.host` | URL host |
-| `.path` | URL path |
-| `.query` | Query parameters (order-insensitive) |
+| Matcher         | Matches on                                           |
+| --------------- | ---------------------------------------------------- |
+| `.method`       | HTTP method (case-insensitive)                       |
+| `.url`          | Full URL string (strict)                             |
+| `.host`         | URL host                                             |
+| `.path`         | URL path                                             |
+| `.query`        | Query parameters (order-insensitive)                 |
 | `.headers([…])` | Specified header values (names are case-insensitive) |
-| `.body` | Request body bytes |
-| `.custom(…)` | Custom `(URLRequest, URLRequest) -> Bool` |
+| `.body`         | Request body bytes                                   |
+| `.custom(…)`    | Custom `(URLRequest, URLRequest) -> Bool`            |
 
 > [!TIP]
 > If built-in matchers don't cover your needs,
@@ -442,11 +438,11 @@ struct ParallelizableAPITests {
 
 **Key differences with `scope: .test`:**
 
-| Aspect | `scope: .global` (default) | `scope: .test` |
-|--------|---------------------------|----------------|
-| Execution | Serialized (one test at a time) | Parallel |
-| URLSession | Works with `URLSession.shared` | Requires `Replay.session` |
-| State isolation | Shared global state | Per-test isolated state |
+| Aspect          | `scope: .global` (default)      | `scope: .test`            |
+| --------------- | ------------------------------- | ------------------------- |
+| Execution       | Serialized (one test at a time) | Parallel                  |
+| URLSession      | Works with `URLSession.shared`  | Requires `Replay.session` |
+| State isolation | Shared global state             | Per-test isolated state   |
 
 > [!IMPORTANT]
 > When using `scope: .test`, you must use `Replay.session` (or `Replay.makeSession()`)
@@ -545,6 +541,7 @@ REPLAY_RECORD_MODE=rewrite swift test --filter <your-test-name>
 
 This means the test made a request that didn't match any entry in the HAR.
 Common fixes:
+
 - Use a more stable matcher set (often `.method, .path` instead of full `.url`)
 - Re-record the fixture intentionally
 - Inspect the archive to see what it contains:
