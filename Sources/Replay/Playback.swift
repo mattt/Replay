@@ -181,7 +181,6 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     private var streamTask: Task<Void, Never>?
     private var urlSessionTask: URLSessionTask?
 
-
     public override class func canInit(with request: URLRequest) -> Bool {
         guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
             return false
@@ -362,7 +361,10 @@ private final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchec
         }
     }
 
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
         if let httpResponse = response as? HTTPURLResponse {
             responseContinuation?.resume(returning: httpResponse)
             responseContinuation = nil
@@ -512,17 +514,19 @@ public actor PlaybackStore {
                     return "  • \(stub.method.rawValue) \(stub.url.absoluteString)\(location)"
                 }.joined(separator: "\n")
 
-                return .error(ReplayError.noMatchingStub(
-                    method: request.httpMethod ?? "GET",
-                    url: request.url?.absoluteString ?? "unknown",
-                    availableStubs: availableStubs.isEmpty ? "  (none)" : availableStubs
-                ))
+                return .error(
+                    ReplayError.noMatchingStub(
+                        method: request.httpMethod ?? "GET",
+                        url: request.url?.absoluteString ?? "unknown",
+                        availableStubs: availableStubs.isEmpty ? "  (none)" : availableStubs
+                    ))
             } else {
-                return .error(ReplayError.noMatchingEntry(
-                    method: request.httpMethod ?? "GET",
-                    url: request.url?.absoluteString ?? "unknown",
-                    archivePath: archivePathDescription(for: config.source)
-                ))
+                return .error(
+                    ReplayError.noMatchingEntry(
+                        method: request.httpMethod ?? "GET",
+                        url: request.url?.absoluteString ?? "unknown",
+                        archivePath: archivePathDescription(for: config.source)
+                    ))
             }
         }
 
