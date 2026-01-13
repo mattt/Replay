@@ -281,7 +281,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                                     startTime: startTime
                                 )
                             } catch {
-                                // Recording failed silently
+                                print("Replay: Failed to record streaming response: \(error)")
                             }
                         }
                     }
@@ -315,7 +315,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                                 startTime: startTime
                             )
                         } catch {
-                            // Recording failed silently
+                            print("Replay: Failed to record streaming response: \(error)")
                         }
                     }
 
@@ -344,7 +344,6 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
 private final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var responseContinuation: CheckedContinuation<HTTPURLResponse, Error>?
     private var dataContinuation: AsyncThrowingStream<Data, Error>.Continuation?
-    private var _dataStream: AsyncThrowingStream<Data, Error>?
 
     var dataStream: AsyncThrowingStream<Data, Error> {
         if let stream = _dataStream { return stream }
@@ -354,6 +353,7 @@ private final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchec
         _dataStream = stream
         return stream
     }
+    private var _dataStream: AsyncThrowingStream<Data, Error>?
 
     func waitForResponse() async throws -> HTTPURLResponse {
         try await withCheckedThrowingContinuation { continuation in
