@@ -181,6 +181,12 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     private var streamTask: Task<Void, Never>?
     private var urlSessionTask: URLSessionTask?
 
+    private static func description(for request: URLRequest) -> String {
+        let method = request.httpMethod ?? "GET"
+        let url = request.url?.absoluteString ?? "<unknown URL>"
+        return "\(method) \(url)"
+    }
+
     public override class func canInit(with request: URLRequest) -> Bool {
         guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
             return false
@@ -281,7 +287,9 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                                     startTime: startTime
                                 )
                             } catch {
-                                print("Replay: Failed to record streaming response: \(error)")
+                                print(
+                                    "Replay: Failed to record response for \(Self.description(for: capturedRequest)): \(error)"
+                                )
                             }
                         }
                     }
@@ -315,7 +323,9 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                                 startTime: startTime
                             )
                         } catch {
-                            print("Replay: Failed to record streaming response: \(error)")
+                            print(
+                                "Replay: Failed to record response for \(Self.description(for: matchingRequest)): \(error)"
+                            )
                         }
                     }
 
