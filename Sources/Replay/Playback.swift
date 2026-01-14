@@ -206,7 +206,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
         // URLProtocol predates Swift concurrency; wrap self to cross isolation boundary
         let sendableSelf = UnsafeSendable(value: self)
         streamTask = Task {
-            let `self` = sendableSelf.value
+            let urlProtocol = sendableSelf.value
             do {
                 var matchingRequest = markedRequest
 
@@ -228,10 +228,10 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
 
                 switch disposition {
                 case .recorded(let response, let data):
-                    self.client?.urlProtocol(
-                        self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                    self.client?.urlProtocol(self, didLoad: data)
-                    self.client?.urlProtocolDidFinishLoading(self)
+                    urlProtocol.client?.urlProtocol(
+                        urlProtocol, didReceive: response, cacheStoragePolicy: .notAllowed)
+                    urlProtocol.client?.urlProtocol(urlProtocol, didLoad: data)
+                    urlProtocol.client?.urlProtocolDidFinishLoading(urlProtocol)
 
                 case .error(let error):
                     throw error
@@ -247,19 +247,20 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     config.timeoutIntervalForResource = .infinity
                     let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
                     let dataTask = session.dataTask(with: matchingRequest)
+                    let sendableDataTask = UnsafeSendable(value: dataTask)
 
                     // Initialize dataStream BEFORE starting the request
                     let dataStream = delegate.dataStream
 
                     // Store task reference for cancellation
-                    self.urlSessionTask = dataTask
+                    urlProtocol.urlSessionTask = dataTask
                     dataTask.resume()
 
                     // Wait for response
                     let httpResponse = try await delegate.waitForResponse()
 
-                    self.client?.urlProtocol(
-                        self, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+                    urlProtocol.client?.urlProtocol(
+                        urlProtocol, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
 
                     // Stream data incrementally, collecting for potential recording
                     // Use a class to allow capturing in the finish handler
@@ -268,13 +269,13 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                         var finished = false
                     }
                     let state = StreamState()
-                    let protocolId = ObjectIdentifier(self)
+                    let protocolId = ObjectIdentifier(urlProtocol)
                     let capturedRequest = matchingRequest
                     let capturedResponse = httpResponse
 
                     // Register finish handler for flush()
                     if shouldRecord {
-                        await store.registerStreamingProtocol(id: protocolId) { [state] in
+                        await store.registerStreamingProtocol(id: protocolId) { [state, sendableDataTask] in
                             guard !state.finished, !state.collectedData.isEmpty else { return }
                             state.finished = true
                             let duration = Date().timeIntervalSince(startTime)
@@ -291,6 +292,9 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                                     "Replay: Failed to record response for \(requestDescription(capturedRequest)): \(error)"
                                 )
                             }
+
+                            // Stop the underlying stream so it doesn't keep accumulating data after `flush()` is called
+                            sendableDataTask.value.cancel()
                         }
                     }
 
@@ -298,9 +302,9 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     do {
                         try await withTaskCancellationHandler {
                             for try await chunk in dataStream {
-                                if Task.isCancelled { break }
+                                if Task.isCancelled || state.finished { break }
                                 state.collectedData.append(chunk)
-                                self.client?.urlProtocol(self, didLoad: chunk)
+                                urlProtocol.client?.urlProtocol(urlProtocol, didLoad: chunk)
                             }
                         } onCancel: {
                             urlTask.cancel()
@@ -330,11 +334,11 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     }
 
                     session.invalidateAndCancel()
-                    self.client?.urlProtocolDidFinishLoading(self)
+                    urlProtocol.client?.urlProtocolDidFinishLoading(urlProtocol)
                 }
             } catch {
                 if !Task.isCancelled {
-                    self.client?.urlProtocol(self, didFailWithError: error)
+                    urlProtocol.client?.urlProtocol(urlProtocol, didFailWithError: error)
                 }
             }
         }
