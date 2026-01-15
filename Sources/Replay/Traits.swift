@@ -129,6 +129,7 @@ import Foundation
             try await function()
 
             if didRecord {
+                await PlaybackStore.shared.flush()
                 print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
         }
@@ -184,6 +185,7 @@ import Foundation
             }
 
             if didRecord {
+                await localStore.flush()
                 print("✓ Recorded HTTP traffic to: \(archiveURL.path)")
             }
         }

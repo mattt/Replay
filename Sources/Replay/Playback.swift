@@ -166,16 +166,26 @@ final class PlaybackStoreRegistry: @unchecked Sendable {
 // MARK: - Playback URLProtocol
 
 /// Wrapper to send non-Sendable values across isolation boundaries when safety is guaranteed.
-private struct UnsafeSendable<T>: @unchecked Sendable {
+struct UnsafeSendable<T>: @unchecked Sendable {
     let value: T
+}
+
+private func requestDescription(_ request: URLRequest) -> String {
+    let method = request.httpMethod ?? "GET"
+    let url = request.url?.absoluteString ?? "<unknown URL>"
+    return "\(method) \(url)"
 }
 
 /// A `URLProtocol` implementation that replays HTTP responses from recorded traffic.
 ///
 /// This protocol routes requests to a `PlaybackStore`,
 /// returning a recorded response when a match is found.
-public final class PlaybackURLProtocol: URLProtocol {
+/// For network requests (live/passthrough mode), responses are streamed incrementally,
+/// enabling support for Server-Sent Events and other streaming protocols.
+public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     private static let handledKey = "ReplayPlaybackHandled"
+    private var streamTask: Task<Void, Never>?
+    private var urlSessionTask: URLSessionTask?
 
     public override class func canInit(with request: URLRequest) -> Bool {
         guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
@@ -195,8 +205,8 @@ public final class PlaybackURLProtocol: URLProtocol {
 
         // URLProtocol predates Swift concurrency; wrap self to cross isolation boundary
         let sendableSelf = UnsafeSendable(value: self)
-        Task {
-            let `self` = sendableSelf.value
+        streamTask = Task {
+            let urlProtocol = sendableSelf.value
             do {
                 var matchingRequest = markedRequest
 
@@ -214,18 +224,181 @@ public final class PlaybackURLProtocol: URLProtocol {
                     store = PlaybackStore.shared
                 }
 
-                let (response, data) = try await store.handleRequest(matchingRequest)
-                self.client?.urlProtocol(
-                    self, didReceive: response, cacheStoragePolicy: .notAllowed)
-                self.client?.urlProtocol(self, didLoad: data)
-                self.client?.urlProtocolDidFinishLoading(self)
+                let disposition = try await store.checkRequest(matchingRequest)
+
+                switch disposition {
+                case .recorded(let response, let data):
+                    urlProtocol.client?.urlProtocol(
+                        urlProtocol, didReceive: response, cacheStoragePolicy: .notAllowed)
+                    urlProtocol.client?.urlProtocol(urlProtocol, didLoad: data)
+                    urlProtocol.client?.urlProtocolDidFinishLoading(urlProtocol)
+
+                case .error(let error):
+                    throw error
+
+                case .network(let shouldRecord):
+                    // Network request: stream bytes incrementally
+                    let startTime = Date()
+
+                    // Use a delegate-based approach for proper cancellation support
+                    let delegate = StreamingDelegate()
+                    let config = URLSessionConfiguration.ephemeral
+                    config.timeoutIntervalForRequest = .infinity
+                    config.timeoutIntervalForResource = .infinity
+                    let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+                    let dataTask = session.dataTask(with: matchingRequest)
+                    let sendableDataTask = UnsafeSendable(value: dataTask)
+
+                    // Initialize dataStream BEFORE starting the request
+                    let dataStream = delegate.dataStream
+
+                    // Store task reference for cancellation
+                    urlProtocol.urlSessionTask = dataTask
+                    dataTask.resume()
+
+                    // Wait for response
+                    let httpResponse = try await delegate.waitForResponse()
+
+                    urlProtocol.client?.urlProtocol(
+                        urlProtocol, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
+
+                    // Stream data incrementally, collecting for potential recording
+                    // Use a class to allow capturing in the finish handler
+                    final class StreamState: @unchecked Sendable {
+                        var collectedData = Data()
+                        var finished = false
+                    }
+                    let state = StreamState()
+                    let protocolId = ObjectIdentifier(urlProtocol)
+                    let capturedRequest = matchingRequest
+                    let capturedResponse = httpResponse
+
+                    // Register finish handler for flush()
+                    if shouldRecord {
+                        await store.registerStreamingProtocol(id: protocolId) { [state, sendableDataTask] in
+                            guard !state.finished, !state.collectedData.isEmpty else { return }
+                            state.finished = true
+                            let duration = Date().timeIntervalSince(startTime)
+                            do {
+                                try await store.recordResponse(
+                                    request: capturedRequest,
+                                    response: capturedResponse,
+                                    data: state.collectedData,
+                                    duration: duration,
+                                    startTime: startTime
+                                )
+                            } catch {
+                                print(
+                                    "Replay: Failed to record response for \(requestDescription(capturedRequest)): \(error)"
+                                )
+                            }
+
+                            // Stop the underlying stream so it doesn't keep accumulating data after `flush()` is called
+                            sendableDataTask.value.cancel()
+                        }
+                    }
+
+                    let urlTask = dataTask
+                    do {
+                        try await withTaskCancellationHandler {
+                            for try await chunk in dataStream {
+                                if Task.isCancelled || state.finished { break }
+                                state.collectedData.append(chunk)
+                                urlProtocol.client?.urlProtocol(urlProtocol, didLoad: chunk)
+                            }
+                        } onCancel: {
+                            urlTask.cancel()
+                        }
+                    } catch {
+                        // Ignore errors (including cancellation) and proceed to recording
+                    }
+
+                    // Record if loop exited naturally (not via flush)
+                    if shouldRecord, !state.finished, !state.collectedData.isEmpty {
+                        state.finished = true
+                        await store.unregisterStreamingProtocol(id: protocolId)
+                        let duration = Date().timeIntervalSince(startTime)
+                        do {
+                            try await store.recordResponse(
+                                request: matchingRequest,
+                                response: httpResponse,
+                                data: state.collectedData,
+                                duration: duration,
+                                startTime: startTime
+                            )
+                        } catch {
+                            print(
+                                "Replay: Failed to record response for \(requestDescription(matchingRequest)): \(error)"
+                            )
+                        }
+                    }
+
+                    session.invalidateAndCancel()
+                    urlProtocol.client?.urlProtocolDidFinishLoading(urlProtocol)
+                }
             } catch {
-                self.client?.urlProtocol(self, didFailWithError: error)
+                if !Task.isCancelled {
+                    urlProtocol.client?.urlProtocol(urlProtocol, didFailWithError: error)
+                }
             }
         }
     }
 
-    public override func stopLoading() {}
+    public override func stopLoading() {
+        urlSessionTask?.cancel()
+        urlSessionTask = nil
+        streamTask?.cancel()
+        streamTask = nil
+    }
+}
+
+// MARK: - Streaming Delegate
+
+/// A delegate that bridges URLSession callbacks to async streams for SSE support.
+private final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private var responseContinuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var dataContinuation: AsyncThrowingStream<Data, Error>.Continuation?
+
+    var dataStream: AsyncThrowingStream<Data, Error> {
+        if let stream = _dataStream { return stream }
+        let stream = AsyncThrowingStream<Data, Error> { continuation in
+            self.dataContinuation = continuation
+        }
+        _dataStream = stream
+        return stream
+    }
+    private var _dataStream: AsyncThrowingStream<Data, Error>?
+
+    func waitForResponse() async throws -> HTTPURLResponse {
+        try await withCheckedThrowingContinuation { continuation in
+            self.responseContinuation = continuation
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        if let httpResponse = response as? HTTPURLResponse {
+            responseContinuation?.resume(returning: httpResponse)
+            responseContinuation = nil
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        dataContinuation?.yield(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            responseContinuation?.resume(throwing: error)
+            responseContinuation = nil
+            dataContinuation?.finish(throwing: error)
+        } else {
+            dataContinuation?.finish()
+        }
+    }
 }
 
 // MARK: - Playback Store
@@ -237,6 +410,29 @@ public final class PlaybackURLProtocol: URLProtocol {
 public actor PlaybackStore {
     /// The shared playback store.
     public static let shared = PlaybackStore()
+
+    /// Active streaming protocols that need to finish recording.
+    private var activeStreamingProtocols: [ObjectIdentifier: (@Sendable () async -> Void)] = [:]
+
+    /// Waits for all active streaming recordings to complete.
+    /// Call this before tearing down to ensure recordings are saved.
+    public func flush() async {
+        let handlers = activeStreamingProtocols.values
+        activeStreamingProtocols.removeAll()
+        for finish in handlers {
+            await finish()
+        }
+    }
+
+    /// Registers an active streaming protocol's finish handler.
+    func registerStreamingProtocol(id: ObjectIdentifier, finish: @escaping @Sendable () async -> Void) {
+        activeStreamingProtocols[id] = finish
+    }
+
+    /// Unregisters a streaming protocol.
+    func unregisterStreamingProtocol(id: ObjectIdentifier) {
+        activeStreamingProtocols[id] = nil
+    }
 
     private var configuration: PlaybackConfiguration?
     private var entries: [HAR.Entry] = []
@@ -294,17 +490,24 @@ public actor PlaybackStore {
         entries
     }
 
-    /// Handles a URL request using the current playback configuration.
+    /// The result of checking whether a request matches a recorded entry.
+    public enum RequestDisposition: Sendable {
+        /// Use the recorded entry's response.
+        case recorded(HTTPURLResponse, Data)
+        /// No match found; go to the network (with optional recording).
+        case network(shouldRecord: Bool)
+        /// No match and strict mode - throw an error.
+        case error(ReplayError)
+    }
+
+    /// Checks how a request should be handled based on playback configuration.
     ///
-    /// In `.strict` playback mode, this method throws when no matching entry is found.
-    /// In `.passthrough` playback mode, this method falls back to the live network on no match.
-    /// In `.live` playback mode, this method always performs the request against the live network.
+    /// This method determines whether a request matches a recorded entry or should
+    /// go to the network. It does not perform any network requests itself.
     ///
-    /// Recording is controlled independently via `recordMode`.
-    ///
-    /// - Parameter request: The request to handle.
-    /// - Returns: A tuple of `HTTPURLResponse` and body `Data`.
-    public func handleRequest(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+    /// - Parameter request: The request to check.
+    /// - Returns: A disposition indicating how to handle the request.
+    public func checkRequest(_ request: URLRequest) throws -> RequestDisposition {
         guard let config = configuration else {
             throw ReplayError.notConfigured
         }
@@ -313,7 +516,8 @@ public actor PlaybackStore {
         if effectivePlaybackMode != .live,
             let entry = config.matchers.firstMatch(for: request, in: entries)
         {
-            return try entry.toURLResponse()
+            let (response, data) = try entry.toURLResponse()
+            return .recorded(response, data)
         }
 
         if effectivePlaybackMode == .strict, !recordingEnabled {
@@ -324,51 +528,107 @@ public actor PlaybackStore {
                     return "  • \(stub.method.rawValue) \(stub.url.absoluteString)\(location)"
                 }.joined(separator: "\n")
 
-                throw ReplayError.noMatchingStub(
-                    method: request.httpMethod ?? "GET",
-                    url: request.url?.absoluteString ?? "unknown",
-                    availableStubs: availableStubs.isEmpty ? "  (none)" : availableStubs
-                )
+                return .error(
+                    ReplayError.noMatchingStub(
+                        method: request.httpMethod ?? "GET",
+                        url: request.url?.absoluteString ?? "unknown",
+                        availableStubs: availableStubs.isEmpty ? "  (none)" : availableStubs
+                    ))
             } else {
-                throw ReplayError.noMatchingEntry(
-                    method: request.httpMethod ?? "GET",
-                    url: request.url?.absoluteString ?? "unknown",
-                    archivePath: archivePathDescription(for: config.source)
+                return .error(
+                    ReplayError.noMatchingEntry(
+                        method: request.httpMethod ?? "GET",
+                        url: request.url?.absoluteString ?? "unknown",
+                        archivePath: archivePathDescription(for: config.source)
+                    ))
+            }
+        }
+
+        return .network(shouldRecord: recordingEnabled)
+    }
+
+    /// Records a completed network response.
+    ///
+    /// Call this after streaming a network response to record it to the HAR file.
+    ///
+    /// - Parameters:
+    ///   - request: The original request.
+    ///   - response: The HTTP response received.
+    ///   - data: The complete response body.
+    ///   - startTime: When the request started.
+    ///   - duration: How long the request took.
+    public func recordResponse(
+        request: URLRequest,
+        response: HTTPURLResponse,
+        data: Data,
+        duration: TimeInterval,
+        startTime: Date
+    ) async throws {
+        guard let config = configuration else {
+            return
+        }
+
+        var entry = try HAR.Entry(
+            request: request,
+            response: response,
+            data: data,
+            startTime: startTime,
+            duration: duration
+        )
+
+        for filter in config.filters {
+            entry = await filter.apply(to: entry)
+        }
+
+        entries.append(entry)
+
+        if case .file(let url) = config.source {
+            var log = (try? HAR.load(from: url)) ?? HAR.create()
+            log.entries = entries
+            try HAR.save(log, to: url)
+        }
+    }
+
+    /// Handles a URL request using the current playback configuration.
+    ///
+    /// In `.strict` playback mode, this method throws when no matching entry is found.
+    /// In `.passthrough` playback mode, this method falls back to the live network on no match.
+    /// In `.live` playback mode, this method always performs the request against the live network.
+    ///
+    /// Recording is controlled independently via `recordMode`.
+    ///
+    /// - Parameter request: The request to handle.
+    /// - Returns: A tuple of `HTTPURLResponse` and body `Data`.
+    ///
+    /// - Note: This method buffers the entire response, making it unsuitable for streaming
+    ///   responses like Server-Sent Events. For streaming support, use `checkRequest(_:)`
+    ///   and handle network requests with `URLSession.bytes(for:)`.
+    public func handleRequest(_ request: URLRequest) async throws -> (HTTPURLResponse, Data) {
+        switch try checkRequest(request) {
+        case .recorded(let response, let data):
+            return (response, data)
+        case .error(let error):
+            throw error
+        case .network(let shouldRecord):
+            let startTime = Date()
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw ReplayError.invalidResponse
+            }
+
+            if shouldRecord {
+                let duration = Date().timeIntervalSince(startTime)
+                try await recordResponse(
+                    request: request,
+                    response: httpResponse,
+                    data: data,
+                    duration: duration,
+                    startTime: startTime
                 )
             }
+
+            return (httpResponse, data)
         }
-
-        let startTime = Date()
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ReplayError.invalidResponse
-        }
-
-        if recordingEnabled {
-            let duration = Date().timeIntervalSince(startTime)
-
-            var entry = try HAR.Entry(
-                request: request,
-                response: httpResponse,
-                data: data,
-                startTime: startTime,
-                duration: duration
-            )
-
-            for filter in config.filters {
-                entry = await filter.apply(to: entry)
-            }
-
-            entries.append(entry)
-
-            if case .file(let url) = config.source {
-                var log = (try? HAR.load(from: url)) ?? HAR.create()
-                log.entries = entries
-                try HAR.save(log, to: url)
-            }
-        }
-
-        return (httpResponse, data)
     }
 
     /// Clears the active configuration and any loaded entries.
