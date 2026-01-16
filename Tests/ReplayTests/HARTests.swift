@@ -558,6 +558,42 @@ struct HARTests {
             #expect(request.queryString[0].name == "key")
             #expect(request.queryString[0].value == "")
         }
+
+        @Test("headers order is deterministic across multiple conversions")
+        func headersOrderIsDeterministic() throws {
+            // Create a URLRequest with multiple headers
+            // Using enough headers to make nondeterministic ordering likely to be observable
+            // This did reliably produce failures before adding the explicit sorting
+            var urlRequest = URLRequest(url: URL(string: "https://example.com/api")!)
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+            urlRequest.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+            urlRequest.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+            urlRequest.setValue("Bearer token123", forHTTPHeaderField: "Authorization")
+            urlRequest.setValue("keep-alive", forHTTPHeaderField: "Connection")
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            urlRequest.setValue("example.com", forHTTPHeaderField: "Host")
+            urlRequest.setValue("https://example.com", forHTTPHeaderField: "Origin")
+            urlRequest.setValue("https://example.com/previous", forHTTPHeaderField: "Referer")
+            urlRequest.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
+
+            // Convert to HAR.Request multiple times
+            let iterations = 10
+            var headerOrders: [[String]] = []
+
+            for _ in 0 ..< iterations {
+                let request = try HAR.Request(from: urlRequest)
+                let headerNames = request.headers.map { $0.name }
+                headerOrders.append(headerNames)
+            }
+
+            // Check if all iterations produced the same header order
+            let firstOrder = headerOrders[0]
+            let allSame = headerOrders.allSatisfy { $0 == firstOrder }
+            #expect(
+                allSame,
+                "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)"
+            )
+        }
     }
 
     // MARK: - Response Tests
@@ -632,6 +668,51 @@ struct HARTests {
             #expect(response.content.text == "{\"success\":true}")
             #expect(response.content.encoding == nil)
             #expect(response.bodySize == data.count)
+        }
+
+        @Test("headers order is deterministic across multiple conversions")
+        func headersOrderIsDeterministic() throws {
+            // Create an HTTPURLResponse with multiple headers
+            // Using enough headers to make nondeterministic ordering likely to be observable
+            // This did reliably produce failures before adding the explicit sorting
+            let url = URL(string: "https://example.com/api")!
+            let data = "{\"test\":true}".data(using: .utf8)!
+
+            // Convert to HAR.Response multiple times
+            let iterations = 10
+            var headerOrders: [[String]] = []
+
+            for _ in 0 ..< iterations {
+                let httpResponse = HTTPURLResponse(
+                    url: url,
+                    statusCode: 200,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: [
+                        "Content-Type": "application/json",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Content-Length": "12345",
+                        "Date": "Thu, 16 Jan 2026 12:00:00 GMT",
+                        "ETag": "\"abc123\"",
+                        "Expires": "0",
+                        "Last-Modified": "Thu, 16 Jan 2026 11:00:00 GMT",
+                        "Server": "nginx/1.21.0",
+                        "Vary": "Accept-Encoding",
+                        "X-Frame-Options": "SAMEORIGIN",
+                    ]
+                )!
+
+                let response = try HAR.Response(from: httpResponse, data: data)
+                let headerNames = response.headers.map { $0.name }
+                headerOrders.append(headerNames)
+            }
+
+            // Check if all iterations produced the same header order
+            let firstOrder = headerOrders[0]
+            let allSame = headerOrders.allSatisfy { $0 == firstOrder }
+            #expect(
+                allSame,
+                "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)"
+            )
         }
 
         @Test("encodes binary data as base64")
