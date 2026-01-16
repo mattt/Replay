@@ -579,8 +579,8 @@ struct HARTests {
             // Convert to HAR.Request multiple times
             let iterations = 10
             var headerOrders: [[String]] = []
-            
-            for _ in 0..<iterations {
+
+            for _ in 0 ..< iterations {
                 let request = try HAR.Request(from: urlRequest)
                 let headerNames = request.headers.map { $0.name }
                 headerOrders.append(headerNames)
@@ -589,7 +589,10 @@ struct HARTests {
             // Check if all iterations produced the same header order
             let firstOrder = headerOrders[0]
             let allSame = headerOrders.allSatisfy { $0 == firstOrder }
-            #expect(allSame, "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)")
+            #expect(
+                allSame,
+                "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)"
+            )
         }
     }
 
@@ -678,8 +681,8 @@ struct HARTests {
             // Convert to HAR.Response multiple times
             let iterations = 10
             var headerOrders: [[String]] = []
-            
-            for _ in 0..<iterations {
+
+            for _ in 0 ..< iterations {
                 let httpResponse = HTTPURLResponse(
                     url: url,
                     statusCode: 200,
@@ -694,10 +697,10 @@ struct HARTests {
                         "Last-Modified": "Thu, 16 Jan 2026 11:00:00 GMT",
                         "Server": "nginx/1.21.0",
                         "Vary": "Accept-Encoding",
-                        "X-Frame-Options": "SAMEORIGIN"
+                        "X-Frame-Options": "SAMEORIGIN",
                     ]
                 )!
-                
+
                 let response = try HAR.Response(from: httpResponse, data: data)
                 let headerNames = response.headers.map { $0.name }
                 headerOrders.append(headerNames)
@@ -706,7 +709,10 @@ struct HARTests {
             // Check if all iterations produced the same header order
             let firstOrder = headerOrders[0]
             let allSame = headerOrders.allSatisfy { $0 == firstOrder }
-            #expect(allSame, "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)")
+            #expect(
+                allSame,
+                "Header order should be consistent across multiple conversions, but got varying orders: \(headerOrders)"
+            )
         }
 
         @Test("encodes binary data as base64")
