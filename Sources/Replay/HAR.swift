@@ -880,9 +880,11 @@ extension HAR.Request {
         self.httpVersion = "HTTP/1.1"
 
         // Headers
-        self.headers = (urlRequest.allHTTPHeaderFields ?? [:]).map { key, value in
-            HAR.Header(name: key, value: value)
-        }
+        self.headers = (urlRequest.allHTTPHeaderFields ?? [:])
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                HAR.Header(name: key, value: value)
+            }
 
         // Query string
         let components = URLComponents(url: url, resolvingAgainstBaseURL: true)
@@ -945,9 +947,11 @@ extension HAR.Response {
         self.statusText = HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
         self.httpVersion = "HTTP/1.1"
 
-        self.headers = httpResponse.allHeaderFields.map { key, value in
-            HAR.Header(name: String(describing: key), value: String(describing: value))
-        }
+        self.headers = httpResponse.allHeaderFields
+            .sorted { String(describing: $0.key) < String(describing: $1.key) }
+            .map { key, value in
+                HAR.Header(name: String(describing: key), value: String(describing: value))
+            }
 
         let mimeType = httpResponse.mimeType ?? "application/octet-stream"
         let utf8Text = String(data: data, encoding: .utf8)
