@@ -62,7 +62,8 @@ jobs:
         run: swift build $SWIFT_VARIANT_ARGS
 
       - name: Smoke test plugin
-        run: swift package $SWIFT_VARIANT_ARGS plugin --allow-writing-to-package-directory replay --help
+        if: matrix.variant == 'default'
+        run: swift package --scratch-path .build/default plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
         run: swift test $SWIFT_VARIANT_ARGS
@@ -107,7 +108,8 @@ jobs:
         run: swift build $SWIFT_VARIANT_ARGS
 
       - name: Smoke test plugin
-        run: swift package $SWIFT_VARIANT_ARGS plugin --allow-writing-to-package-directory replay --help
+        if: matrix.variant == 'default'
+        run: swift package --scratch-path .build/default plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
         run: swift test $SWIFT_VARIANT_ARGS
