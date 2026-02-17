@@ -434,7 +434,7 @@ public actor PlaybackStore {
         activeStreamingProtocols[id] = nil
     }
 
-    private var configuration: PlaybackConfiguration?
+    internal private(set) var configuration: PlaybackConfiguration?
     private var entries: [HAR.Entry] = []
     private var recordingEnabled: Bool = false
     private var effectivePlaybackMode: Replay.PlaybackMode = .strict
@@ -583,6 +583,23 @@ public actor PlaybackStore {
         entries.append(entry)
 
         if case .file(let url) = config.source {
+            var log = (try? HAR.load(from: url)) ?? HAR.create()
+            log.entries = entries
+            try HAR.save(log, to: url)
+        }
+    }
+
+    /// Records a pre-built HAR entry.
+    ///
+    /// This method appends the entry to the store and persists it
+    /// when the source is a file. Filters are **not** applied;
+    /// callers are responsible for filtering before calling this method.
+    ///
+    /// - Parameter entry: The entry to record.
+    public func recordEntry(_ entry: HAR.Entry) throws {
+        entries.append(entry)
+
+        if let config = configuration, case .file(let url) = config.source {
             var log = (try? HAR.load(from: url)) ?? HAR.create()
             log.entries = entries
             try HAR.save(log, to: url)

@@ -23,12 +23,23 @@ let package = Package(
             targets: ["ReplayPlugin"]
         ),
     ],
+    traits: [
+        .trait(name: "AsyncHTTPClient")
+    ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0")
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.24.0"),
     ],
     targets: [
         .target(
-            name: "Replay"
+            name: "Replay",
+            dependencies: [
+                .product(
+                    name: "AsyncHTTPClient",
+                    package: "async-http-client",
+                    condition: .when(traits: ["AsyncHTTPClient"])
+                )
+            ]
         ),
         .executableTarget(
             name: "ReplayCLI",
