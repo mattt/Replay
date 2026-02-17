@@ -131,7 +131,7 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/mattt/Replay.git", from: "0.2.0")
+    .package(url: "https://github.com/mattt/Replay.git", from: "0.3.0")
 ]
 ```
 
@@ -144,6 +144,22 @@ Then add `Replay` to your **test target** dependencies:
         .product(name: "Replay", package: "Replay")
     ]
 )
+```
+
+#### AsyncHTTPClient support
+
+Replay can also intercept requests made with
+[AsyncHTTPClient](https://github.com/swift-server/async-http-client).
+Enable the `AsyncHTTPClient` package trait:
+
+```swift
+dependencies: [
+    .package(
+        url: "https://github.com/mattt/Replay.git",
+        from: "0.3.0",
+        traits: ["AsyncHTTPClient"]
+    )
+]
 ```
 
 ### Xcode
@@ -474,6 +490,78 @@ Open the Network tab, trigger the requests, then export as HAR:
 > [!WARNING]
 > Browser-exported HAR files often contain sensitive data (cookies, tokens, PII).
 > Always review and redact before committing.
+
+### AsyncHTTPClient
+
+When the `AsyncHTTPClient` trait is enabled,
+Replay provides `HTTPClientProtocol` — a protocol that both
+`HTTPClient` and `ReplayHTTPClient` conform to.
+Design your code against `some HTTPClientProtocol`
+and swap in `ReplayHTTPClient` during tests:
+
+```swift
+import AsyncHTTPClient
+import NIOCore
+
+actor ExampleAPIClient {
+    let httpClient: any HTTPClientProtocol
+
+    init(httpClient: any HTTPClientProtocol) {
+        self.httpClient = httpClient
+    }
+
+    func fetchUser(id: Int) async throws -> User {
+        let request = HTTPClientRequest(url: "https://api.example.com/users/\(id)")
+        let response = try await httpClient.execute(request, timeout: .seconds(30))
+        let body = try await response.body.collect(upTo: 1024 * 1024)
+        return try JSONDecoder().decode(User.self, from: body)
+    }
+}
+```
+
+In tests, use `ReplayHTTPClient` with HAR files or inline stubs:
+
+```swift
+import Testing
+import Replay
+
+@Test("fetch user from stub")
+func fetchUser() async throws {
+    let client = try await ReplayHTTPClient(
+        stubs: [
+            Stub(
+                .get,
+                "https://api.example.com/users/42",
+                status: 200,
+                headers: ["Content-Type": "application/json"],
+                body: #"{"id":42,"name":"Alice"}"#
+            )
+        ]
+    )
+
+    let api = ExampleAPIClient(httpClient: client)
+    let user = try await api.fetchUser(id: 42)
+    #expect(user.name == "Alice")
+}
+```
+
+`ReplayHTTPClient` also accepts a `PlaybackConfiguration`
+for HAR-file-based playback:
+
+```swift
+let client = try await ReplayHTTPClient(
+    configuration: PlaybackConfiguration(
+        source: .file(archiveURL),
+        playbackMode: .strict,
+        matchers: [.method, .path]
+    )
+)
+```
+
+> [!NOTE]
+> `AsyncHTTPClient` uses SwiftNIO for networking rather than Foundation's URL Loading System,
+> so `URLProtocol`-based interception (used by `@Test(.replay(…))`) cannot intercept its traffic.
+> The `HTTPClientProtocol` abstraction provides an equivalent mechanism through dependency injection.
 
 ### Using Replay without Swift Testing
 
