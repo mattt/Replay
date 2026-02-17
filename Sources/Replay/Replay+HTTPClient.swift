@@ -142,33 +142,44 @@
             _ request: HTTPClientRequest,
             deadline: NIODeadline
         ) async throws -> HTTPClientResponse {
-            try await handle(request)
+            try await handle(request, deadline: deadline)
         }
 
         public func execute(
             _ request: HTTPClientRequest,
             timeout: TimeAmount
         ) async throws -> HTTPClientResponse {
-            try await handle(request)
+            try await handle(request, deadline: .now() + timeout)
         }
 
         // MARK: - Private
 
-        private func handle(_ request: HTTPClientRequest) async throws -> HTTPClientResponse {
-            let urlRequest = try await URLRequest(from: request)
+        private func handle(
+            _ request: HTTPClientRequest,
+            deadline: NIODeadline
+        ) async throws -> HTTPClientResponse {
+            guard URL(string: request.url) != nil else {
+                throw ReplayError.invalidURL(request.url)
+            }
+
+            // Materialize the body once so it can be used for both matching and forwarding.
+            var materializedRequest = request
+            var bodyData: Data?
+            if let body = request.body {
+                var collected = ByteBuffer()
+                for try await var chunk in body {
+                    collected.writeBuffer(&chunk)
+                }
+                bodyData = Data(buffer: collected)
+                materializedRequest.body = .bytes(collected)
+            }
+
+            let urlRequest = URLRequest(from: materializedRequest, bodyData: bodyData)
             let disposition = try await store.checkRequest(urlRequest)
 
             switch disposition {
-            case .recorded(_, let data):
-                guard
-                    let entry = await store.configuration?.matchers.firstMatch(
-                        for: urlRequest,
-                        in: await store.getAvailableEntries()
-                    )
-                else {
-                    throw ReplayError.invalidResponse
-                }
-                return HTTPClientResponse(entry: entry, data: data)
+            case .recorded(let response, let data):
+                return HTTPClientResponse(response: response, data: data)
 
             case .error(let error):
                 throw error
@@ -179,14 +190,16 @@
                 }
 
                 let startTime = Date()
-                let response = try await client.execute(request, timeout: .seconds(30))
+                let response = try await client.execute(
+                    materializedRequest, deadline: deadline)
                 let body = try await response.body.collect(upTo: 10 * 1024 * 1024)
                 let data = Data(buffer: body)
                 let duration = Date().timeIntervalSince(startTime)
 
                 if shouldRecord {
                     var entry = try HAR.Entry(
-                        clientRequest: request,
+                        clientRequest: materializedRequest,
+                        bodyData: bodyData,
                         status: Int(response.status.code),
                         responseHeaders: response.headers,
                         data: data,
@@ -203,7 +216,11 @@
                     try await store.recordEntry(entry)
                 }
 
-                return response
+                return HTTPClientResponse(
+                    status: response.status,
+                    headers: response.headers,
+                    body: .bytes(ByteBuffer(data: data))
+                )
             }
         }
     }
@@ -211,39 +228,30 @@
     // MARK: - Conversions
 
     extension URLRequest {
-        /// Creates a `URLRequest` from an `HTTPClientRequest`.
-        init(from request: HTTPClientRequest) async throws {
-            guard let url = URL(string: request.url) else {
-                throw ReplayError.invalidURL(request.url)
-            }
-
-            self.init(url: url)
+        /// Creates a `URLRequest` from an `HTTPClientRequest` with pre-materialized body data.
+        init(from request: HTTPClientRequest, bodyData: Data?) {
+            // Force-unwrap is safe: handle(_:) validated the URL before calling this.
+            self.init(url: URL(string: request.url)!)
             self.httpMethod = request.method.rawValue
 
             for header in request.headers {
                 self.addValue(header.value, forHTTPHeaderField: header.name)
             }
 
-            if let body = request.body {
-                var collected = ByteBuffer()
-                for try await var chunk in body {
-                    collected.writeBuffer(&chunk)
-                }
-                self.httpBody = Data(buffer: collected)
-            }
+            self.httpBody = bodyData
         }
     }
 
     extension HTTPClientResponse {
-        /// Creates an `HTTPClientResponse` from a HAR entry's response data.
-        init(entry: HAR.Entry, data: Data) {
+        /// Creates an `HTTPClientResponse` from an `HTTPURLResponse` and body data.
+        init(response: HTTPURLResponse, data: Data) {
             var headers = HTTPHeaders()
-            for header in entry.response.headers {
-                headers.add(name: header.name, value: header.value)
+            for (key, value) in response.allHeaderFields {
+                headers.add(name: String(describing: key), value: String(describing: value))
             }
 
             self.init(
-                status: HTTPResponseStatus(statusCode: entry.response.status),
+                status: HTTPResponseStatus(statusCode: response.statusCode),
                 headers: headers,
                 body: data.isEmpty ? .init() : .bytes(ByteBuffer(data: data))
             )
@@ -252,8 +260,18 @@
 
     extension HAR.Entry {
         /// Creates a HAR entry from an `HTTPClientRequest` and response metadata.
+        ///
+        /// - Parameters:
+        ///   - request: The original HTTP client request.
+        ///   - bodyData: Pre-materialized request body data, if any.
+        ///   - status: The HTTP response status code.
+        ///   - responseHeaders: The HTTP response headers.
+        ///   - data: The response body data.
+        ///   - startTime: When the request started.
+        ///   - duration: How long the request took.
         init(
             clientRequest request: HTTPClientRequest,
+            bodyData: Data? = nil,
             status: Int,
             responseHeaders: HTTPHeaders,
             data: Data,
@@ -279,14 +297,26 @@
                     HAR.QueryParameter(name: item.name, value: item.value ?? "")
                 } ?? []
 
+            var postData: HAR.PostData?
+            if let bodyData, !bodyData.isEmpty {
+                let contentType =
+                    request.headers.first(name: "Content-Type") ?? "application/octet-stream"
+                let utf8Text = String(data: bodyData, encoding: .utf8)
+                postData = HAR.PostData(
+                    mimeType: contentType,
+                    text: utf8Text ?? bodyData.base64EncodedString()
+                )
+            }
+
             self.request = HAR.Request(
                 method: request.method.rawValue,
                 url: request.url,
                 httpVersion: "HTTP/1.1",
                 headers: harHeaders,
                 queryString: queryString,
+                postData: postData,
                 headersSize: -1,
-                bodySize: 0
+                bodySize: bodyData?.count ?? 0
             )
 
             // Build HAR response

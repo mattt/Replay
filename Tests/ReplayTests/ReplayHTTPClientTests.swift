@@ -223,12 +223,12 @@
         @Suite("Conversion Tests")
         struct ConversionTests {
             @Test("URLRequest from HTTPClientRequest preserves method and URL")
-            func urlRequestFromHTTPClientRequest() async throws {
+            func urlRequestFromHTTPClientRequest() {
                 var request = HTTPClientRequest(url: "https://api.example.com/users?page=1")
                 request.method = .POST
                 request.headers.add(name: "Content-Type", value: "application/json")
 
-                let urlRequest = try await URLRequest(from: request)
+                let urlRequest = URLRequest(from: request, bodyData: nil)
 
                 #expect(urlRequest.httpMethod == "POST")
                 #expect(urlRequest.url?.absoluteString == "https://api.example.com/users?page=1")
@@ -236,42 +236,27 @@
             }
 
             @Test("URLRequest from HTTPClientRequest preserves body")
-            func urlRequestPreservesBody() async throws {
+            func urlRequestPreservesBody() {
                 var request = HTTPClientRequest(url: "https://api.example.com/data")
                 request.method = .POST
-                request.body = .bytes(ByteBuffer(string: "hello"))
 
-                let urlRequest = try await URLRequest(from: request)
+                let bodyData = "hello".data(using: .utf8)
+                let urlRequest = URLRequest(from: request, bodyData: bodyData)
 
-                #expect(urlRequest.httpBody == "hello".data(using: .utf8))
+                #expect(urlRequest.httpBody == bodyData)
             }
 
-            @Test("HTTPClientResponse from HAR entry preserves status and headers")
-            func httpClientResponseFromEntry() {
-                let entry = HAR.Entry(
-                    startedDateTime: Date(),
-                    time: 50,
-                    request: HAR.Request(
-                        method: "GET",
-                        url: "https://example.com",
-                        httpVersion: "HTTP/1.1",
-                        headers: [],
-                        bodySize: 0
-                    ),
-                    response: HAR.Response(
-                        status: 201,
-                        statusText: "Created",
-                        httpVersion: "HTTP/1.1",
-                        headers: [
-                            HAR.Header(name: "X-Request-Id", value: "abc123")
-                        ],
-                        content: HAR.Content(size: 4, mimeType: "text/plain", text: "done"),
-                        bodySize: 4
-                    ),
-                    timings: HAR.Timings(send: 0, wait: 50, receive: 0)
-                )
+            @Test("HTTPClientResponse from HTTPURLResponse preserves status and headers")
+            func httpClientResponseFromHTTPURLResponse() {
+                let httpResponse = HTTPURLResponse(
+                    url: URL(string: "https://example.com")!,
+                    statusCode: 201,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["X-Request-Id": "abc123"]
+                )!
 
-                let response = HTTPClientResponse(entry: entry, data: "done".data(using: .utf8)!)
+                let response = HTTPClientResponse(
+                    response: httpResponse, data: "done".data(using: .utf8)!)
 
                 #expect(response.status == .created)
                 #expect(response.headers.first(name: "X-Request-Id") == "abc123")
