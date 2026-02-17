@@ -8,7 +8,7 @@ on:
 
 jobs:
   test-macos:
-    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }} (${{ matrix.variant }})
+    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}${{ matrix.variant == 'async_http_client' && ' (AsyncHTTPClient)' || '' }}
     runs-on: macos-${{ matrix.macos }}
     env:
       DEVELOPER_DIR: "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
@@ -69,7 +69,7 @@ jobs:
         run: swift test $SWIFT_VARIANT_ARGS
 
   test-linux:
-    name: Swift ${{ matrix.swift-version }} on Linux (${{ matrix.variant }})
+    name: Swift ${{ matrix.swift-version }} on Linux${{ matrix.variant == 'async_http_client' && ' (AsyncHTTPClient)' || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
