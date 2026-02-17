@@ -8,7 +8,7 @@ on:
 
 jobs:
   test-macos:
-    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}
+    name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }} (${{ matrix.variant }})
     runs-on: macos-${{ matrix.macos }}
     env:
       DEVELOPER_DIR: "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
@@ -19,9 +19,19 @@ jobs:
           - swift: "6.1"
             xcode: "16.3"
             macos: "15"
+            variant: default
           - swift: "6.2"
             xcode: "26.0"
             macos: "26"
+            variant: default
+          - swift: "6.1"
+            xcode: "16.3"
+            macos: "15"
+            variant: async_http_client
+          - swift: "6.2"
+            xcode: "26.0"
+            macos: "26"
+            variant: async_http_client
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -33,31 +43,45 @@ jobs:
           path: |
             ~/.cache/org.swift.swiftpm
             .build
-          key: ${{ runner.os }}-swift-${{ matrix.swift }}-spm-${{ hashFiles('**/Package.resolved') }}
+          key: ${{ runner.os }}-swift-${{ matrix.swift }}-${{ matrix.variant }}-spm-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swift-${{ matrix.swift }}-spm-
+            ${{ runner.os }}-swift-${{ matrix.swift }}-${{ matrix.variant }}-spm-
+
+      - name: Configure variant
+        run: |
+          if [ "${{ matrix.variant }}" = "async_http_client" ]; then
+            echo "SWIFT_VARIANT_ARGS=--traits AsyncHTTPClient --scratch-path .build/async-http-client" >> "$GITHUB_ENV"
+          else
+            echo "SWIFT_VARIANT_ARGS=--scratch-path .build/default" >> "$GITHUB_ENV"
+          fi
 
       - name: Lint
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build
+        run: swift build $SWIFT_VARIANT_ARGS
 
       - name: Smoke test plugin
-        run: swift package plugin --allow-writing-to-package-directory replay --help
+        run: swift package $SWIFT_VARIANT_ARGS plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
-        run: swift test --traits AsyncHTTPClient
+        run: swift test $SWIFT_VARIANT_ARGS
 
   test-linux:
-    name: Swift ${{ matrix.swift-version }} on Linux
+    name: Swift ${{ matrix.swift-version }} on Linux (${{ matrix.variant }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        swift-version:
-          - "6.1.3"
-          - "6.2.3"
+        include:
+          - swift-version: "6.1.3"
+            variant: default
+          - swift-version: "6.2.3"
+            variant: default
+          - swift-version: "6.1.3"
+            variant: async_http_client
+          - swift-version: "6.2.3"
+            variant: async_http_client
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -68,14 +92,22 @@ jobs:
         with:
           toolchain: ${{ matrix.swift-version }}
 
+      - name: Configure variant
+        run: |
+          if [ "${{ matrix.variant }}" = "async_http_client" ]; then
+            echo "SWIFT_VARIANT_ARGS=--traits AsyncHTTPClient --scratch-path .build/async-http-client" >> "$GITHUB_ENV"
+          else
+            echo "SWIFT_VARIANT_ARGS=--scratch-path .build/default" >> "$GITHUB_ENV"
+          fi
+
       - name: Lint
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build
+        run: swift build $SWIFT_VARIANT_ARGS
 
       - name: Smoke test plugin
-        run: swift package plugin --allow-writing-to-package-directory replay --help
+        run: swift package $SWIFT_VARIANT_ARGS plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
-        run: swift test --traits AsyncHTTPClient
+        run: swift test $SWIFT_VARIANT_ARGS
