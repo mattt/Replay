@@ -2,6 +2,9 @@
 
     import AsyncHTTPClient
     import Foundation
+    #if canImport(FoundationNetworking)
+        import FoundationNetworking
+    #endif
     import NIOCore
     import NIOHTTP1
     import Testing
