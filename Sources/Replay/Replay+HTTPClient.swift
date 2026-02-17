@@ -170,7 +170,7 @@
                 for try await var chunk in body {
                     collected.writeBuffer(&chunk)
                 }
-                bodyData = Data(buffer: collected)
+                bodyData = Data(collected.readableBytesView)
                 materializedRequest.body = .bytes(collected)
             }
 
@@ -193,7 +193,7 @@
                 let response = try await client.execute(
                     materializedRequest, deadline: deadline)
                 let body = try await response.body.collect(upTo: 10 * 1024 * 1024)
-                let data = Data(buffer: body)
+                let data = Data(body.readableBytesView)
                 let duration = Date().timeIntervalSince(startTime)
 
                 if shouldRecord {
@@ -219,7 +219,7 @@
                 return HTTPClientResponse(
                     status: response.status,
                     headers: response.headers,
-                    body: .bytes(ByteBuffer(data: data))
+                    body: .bytes(ByteBuffer(bytes: data))
                 )
             }
         }
@@ -253,7 +253,7 @@
             self.init(
                 status: HTTPResponseStatus(statusCode: response.statusCode),
                 headers: headers,
-                body: data.isEmpty ? .init() : .bytes(ByteBuffer(data: data))
+                body: data.isEmpty ? .init() : .bytes(ByteBuffer(bytes: data))
             )
         }
     }
