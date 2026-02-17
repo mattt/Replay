@@ -41,13 +41,13 @@ jobs:
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build -v
+        run: swift build --traits AsyncHTTPClient
 
       - name: Smoke test plugin
         run: swift package plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
-        run: swift test -v
+        run: swift test --traits AsyncHTTPClient
 
   test-linux:
     name: Swift ${{ matrix.swift-version }} on Linux
@@ -72,10 +72,10 @@ jobs:
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build -v
+        run: swift build --traits AsyncHTTPClient
 
       - name: Smoke test plugin
         run: swift package plugin --allow-writing-to-package-directory replay --help
 
       - name: Test
-        run: swift test -v
+        run: swift test --traits AsyncHTTPClient
