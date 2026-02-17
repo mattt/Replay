@@ -41,7 +41,7 @@ jobs:
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build --traits AsyncHTTPClient
+        run: swift build
 
       - name: Smoke test plugin
         run: swift package plugin --allow-writing-to-package-directory replay --help
@@ -72,7 +72,7 @@ jobs:
         run: swift format lint --strict --recursive .
 
       - name: Build
-        run: swift build --traits AsyncHTTPClient
+        run: swift build
 
       - name: Smoke test plugin
         run: swift package plugin --allow-writing-to-package-directory replay --help
