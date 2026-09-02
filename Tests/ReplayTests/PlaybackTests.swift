@@ -592,7 +592,18 @@ struct PlaybackTests {
 
         // URLProtocol.registerClass behavior differs on Linux
         #if !canImport(FoundationNetworking)
-            @Test("live mode ignores recorded entries and always hits the network")
+            // `.playbackIsolated` is required, not decorative:
+            // this test registers a `URLProtocol` globally
+            // and performs a real `URLSession.shared` request.
+            // Without the lock,
+            // a `.replay` test in another suite can register `PlaybackURLProtocol`
+            // in between,
+            // and `PlaybackURLProtocol.canInit(with:)` accepts every request,
+            // so the live request is answered by `PlaybackStore.shared` instead.
+            @Test(
+                "live mode ignores recorded entries and always hits the network",
+                .playbackIsolated
+            )
             func liveModeIgnoresEntries() async throws {
                 URLProtocol.registerClass(NetworkStubURLProtocol.self)
                 defer { URLProtocol.unregisterClass(NetworkStubURLProtocol.self) }
