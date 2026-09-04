@@ -848,8 +848,15 @@ enum PlaybackChallengeDecision: CaseIterable {
         case .useCredential: sender.use(credential, for: challenge)
         case .continueWithoutCredential: sender.continueWithoutCredential(for: challenge)
         case .cancel: sender.cancel(challenge)
-        case .performDefaultHandling: sender.performDefaultHandling?(for: challenge)
-        case .rejectProtectionSpace: sender.rejectProtectionSpaceAndContinue?(with: challenge)
+        // These two are optional protocol requirements on Darwin
+        // but required ones in FoundationNetworking.
+        #if canImport(FoundationNetworking)
+            case .performDefaultHandling: sender.performDefaultHandling(for: challenge)
+            case .rejectProtectionSpace: sender.rejectProtectionSpaceAndContinue(with: challenge)
+        #else
+            case .performDefaultHandling: sender.performDefaultHandling?(for: challenge)
+            case .rejectProtectionSpace: sender.rejectProtectionSpaceAndContinue?(with: challenge)
+        #endif
         }
     }
 }
