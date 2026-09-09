@@ -254,66 +254,112 @@ import Foundation
         }
 
         private func getArchiveURL(name: String, test: Test) async throws -> URL {
-            let normalizedName = normalizeArchiveName(name)
-            // 1. Check explicit override from IsolationTrait or defaults
+            let recordMode = (try? Replay.RecordMode.fromEnvironment()) ?? .none
+            return try await resolveArchiveURL(name: name, test: test, recordMode: recordMode)
+        }
+
+        /// Resolves the archive location for a test.
+        ///
+        /// Resolution order, where `<directory>` is this trait's `directory`
+        /// (`Replays` by default):
+        ///
+        /// 1. A `rootURL` passed to this trait.
+        /// 2. A directory set with `.playbackIsolated(replaysRootURL:)`.
+        /// 3. `<directory>/` next to the test's source file,
+        ///    when that file is present on this machine.
+        ///    Recording writes here,
+        ///    and playback reads from here when the archive exists.
+        /// 4. A bundle set with `.playbackIsolated(replaysFrom:)`.
+        /// 5. Any loaded bundle that contains `<directory>/<name>.har` as a resource.
+        /// 6. `<directory>/` under the current working directory.
+        func resolveArchiveURL(name: String, test: Test, recordMode: Replay.RecordMode) async throws -> URL {
+            let fileName = "\(normalizeArchiveName(name)).har"
+            let isRecording = recordMode != .none
+
+            // 1. Explicit override on the trait.
             if let rootURL {
-                return rootURL.appendingPathComponent("\(normalizedName).har")
-            }
-            if let defaultRootURL = await ReplayTestDefaults.shared.getReplaysRootURL() {
-                return defaultRootURL.appendingPathComponent("\(normalizedName).har")
+                return rootURL.appendingPathComponent(fileName)
             }
 
-            // 2. Resolve via Source Location (Preferred for local development & recording)
-            if let fileID = test.sourceLocation.fileID as String? {
-                let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-                // Attempt to resolve fileID against common Swift package roots
-                let searchRoots = ["Tests", "Sources"]
+            // 2. Explicit directory from the isolation trait.
+            let defaultRoot = await ReplayTestDefaults.shared.getArchiveRoot()
+            if case .directory(let url) = defaultRoot {
+                return url.appendingPathComponent(fileName)
+            }
 
-                for root in searchRoots {
-                    let candidateSource = cwd.appendingPathComponent(root).appendingPathComponent(fileID)
-                    if FileManager.default.fileExists(atPath: candidateSource.path) {
-                        // Found the test source file. Resolve 'Replays' directory relative to it.
-                        let archiveURL =
-                            candidateSource
-                            .deletingLastPathComponent()  // File directory
-                            .appendingPathComponent(directory)  // "Replays"
-                            .appendingPathComponent("\(normalizedName).har")
+            // 3. Next to the test's source file.
+            // Bundles are rebuilt on every build, so recording into one loses the archive;
+            // the source tree is the only durable destination.
+            if let sourceDirectory = Self.sourceDirectory(for: test) {
+                let archiveURL =
+                    sourceDirectory
+                    .appendingPathComponent(directory)
+                    .appendingPathComponent(fileName)
 
-                        // If recording, use this source-relative path
-                        if (try? Replay.RecordMode.fromEnvironment()) != Replay.RecordMode.none {
-                            try? FileManager.default.createDirectory(
-                                at: archiveURL.deletingLastPathComponent(),
-                                withIntermediateDirectories: true
-                            )
-                            return archiveURL
-                        }
+                if isRecording {
+                    try? FileManager.default.createDirectory(
+                        at: archiveURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    return archiveURL
+                }
 
-                        // If playback, use it if it exists (faster feedback loop than Bundle copy)
-                        if FileManager.default.fileExists(atPath: archiveURL.path) {
-                            return archiveURL
-                        }
-                    }
+                if FileManager.default.fileExists(atPath: archiveURL.path) {
+                    return archiveURL
                 }
             }
 
-            // 3. Fallback: Search in Bundles (for CI / copied resources)
-            // We search for the directory/name.har combination in all available bundles.
+            // 4. Bundle from the isolation trait (copied resources, typically in CI).
+            if case .bundle(let url) = defaultRoot {
+                return url.appendingPathComponent(fileName)
+            }
+
+            // 5. Any loaded bundle that carries the archive as a resource.
             let bundles = Bundle.allBundles + Bundle.allFrameworks
             for bundle in bundles {
                 if let url = bundle.url(
-                    forResource: normalizedName, withExtension: "har", subdirectory: directory)
+                    forResource: normalizeArchiveName(name), withExtension: "har", subdirectory: directory)
                 {
                     return url
                 }
             }
 
-            // 4. Fallback to CWD/directory (Old behavior, mostly for Linux or when sourceLocation is missing)
+            // 6. Current working directory (Linux, or when the source location is unavailable).
             let cwdURL = URL(fileURLWithPath: directory)
-            if (try? Replay.RecordMode.fromEnvironment()) != Replay.RecordMode.none {
+            if isRecording {
                 try? FileManager.default.createDirectory(
                     at: cwdURL, withIntermediateDirectories: true)
             }
-            return cwdURL.appendingPathComponent("\(normalizedName).har")
+            return cwdURL.appendingPathComponent(fileName)
+        }
+
+        /// The directory containing the test's source file,
+        /// if that file exists on this machine.
+        ///
+        /// Swift Testing records the absolute path at compile time,
+        /// which is the location to check first.
+        /// The `Tests/` and `Sources/` guesses against the working directory
+        /// cover test bundles built elsewhere and run from a package checkout.
+        private static func sourceDirectory(for test: Test) -> URL? {
+            #if compiler(>=6.3)
+                let filePath = test.sourceLocation.filePath
+            #else
+                let filePath = test.sourceLocation._filePath
+            #endif
+
+            var candidates = [URL(fileURLWithPath: filePath)]
+
+            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            let fileID = test.sourceLocation.fileID
+            for root in ["Tests", "Sources"] {
+                candidates.append(cwd.appendingPathComponent(root).appendingPathComponent(fileID))
+            }
+
+            guard let sourceFile = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) })
+            else {
+                return nil
+            }
+            return sourceFile.deletingLastPathComponent()
         }
     }
 
@@ -402,18 +448,31 @@ import Foundation
 
     // MARK: - Playback Isolation for Tests
 
+    /// Where `.playbackIsolated` points archive resolution when a test
+    /// doesn't say otherwise.
+    enum ArchiveRoot: Sendable, Equatable {
+        /// A directory chosen by the caller.
+        /// Used for playback and recording alike.
+        case directory(URL)
+
+        /// A bundle's resource directory.
+        /// Used for playback only, after the test's source tree,
+        /// because bundles are rebuilt on every build.
+        case bundle(URL)
+    }
+
     /// Default configuration for `ReplayTrait` archive resolution.
     private actor ReplayTestDefaults {
         static let shared = ReplayTestDefaults()
 
-        private var replaysRootURL: URL?
+        private var archiveRoot: ArchiveRoot?
 
-        func getReplaysRootURL() -> URL? {
-            replaysRootURL
+        func getArchiveRoot() -> ArchiveRoot? {
+            archiveRoot
         }
 
-        func setReplaysRootURL(_ url: URL?) {
-            replaysRootURL = url
+        func setArchiveRoot(_ root: ArchiveRoot?) {
+            archiveRoot = root
         }
     }
 
@@ -486,30 +545,42 @@ import Foundation
     /// Note: `ReplayTrait` already applies global isolation automatically. This trait is still
     /// useful when you need to override the archive root location (e.g. `Bundle.module`).
     public struct PlaybackIsolationTrait: TestTrait, SuiteTrait, TestScoping {
-        private let replaysRootURL: URL?
+        private let root: ArchiveRoot?
 
         /// Creates an isolation trait without changing the archive root.
         ///
         /// Use this trait to serialize tests that touch Replay playback,
         /// even when you are not overriding archive resolution.
         public init() {
-            self.replaysRootURL = nil
+            self.root = nil
+        }
+
+        init(root: ArchiveRoot?) {
+            self.root = root
         }
 
         /// Creates an isolation trait that overrides the replay archive root.
         ///
+        /// The directory is used for playback and recording alike.
+        ///
         /// - Parameter replaysRootURL: The root URL containing replay archives.
         public init(replaysRootURL: URL?) {
-            self.replaysRootURL = replaysRootURL
+            self.root = replaysRootURL.map { .directory($0) }
         }
 
         /// Creates an isolation trait that resolves archives from a bundle resource directory.
+        ///
+        /// The bundle is a playback fallback.
+        /// When the test's source file is present on this machine,
+        /// an archive next to it takes precedence for playback,
+        /// and recording writes there rather than into the bundle
+        /// (bundles are rebuilt on every build, so an archive recorded into one is lost).
         ///
         /// - Parameters:
         ///   - bundle: The bundle containing replay archives.
         ///   - subdirectory: The subdirectory within the bundle's resource directory.
         public init(replaysFrom bundle: Bundle, subdirectory: String = "Replays") {
-            self.replaysRootURL = bundle.resourceURL?.appendingPathComponent(subdirectory)
+            self.root = bundle.resourceURL.map { .bundle($0.appendingPathComponent(subdirectory)) }
         }
 
         public func provideScope(
@@ -519,17 +590,17 @@ import Foundation
         ) async throws {
             try await PlaybackIsolationLock.shared.withLock {
                 let defaults = ReplayTestDefaults.shared
-                let previousReplaysRootURL = await defaults.getReplaysRootURL()
+                let previousRoot = await defaults.getArchiveRoot()
 
-                if let replaysRootURL {
-                    await defaults.setReplaysRootURL(replaysRootURL)
+                if let root {
+                    await defaults.setArchiveRoot(root)
                 }
 
                 do {
                     try await function()
-                    await defaults.setReplaysRootURL(previousReplaysRootURL)
+                    await defaults.setArchiveRoot(previousRoot)
                 } catch {
-                    await defaults.setReplaysRootURL(previousReplaysRootURL)
+                    await defaults.setArchiveRoot(previousRoot)
                     throw error
                 }
             }
