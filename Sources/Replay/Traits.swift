@@ -260,16 +260,18 @@ import Foundation
 
         /// Resolves the archive location for a test.
         ///
-        /// Resolution order:
+        /// Resolution order, where `<directory>` is this trait's `directory`
+        /// (`Replays` by default):
         ///
         /// 1. A `rootURL` passed to this trait.
         /// 2. A directory set with `.playbackIsolated(replaysRootURL:)`.
-        /// 3. The `Replays/` directory next to the test's source file.
-        ///    Recording always writes here when the source file is present,
+        /// 3. `<directory>/` next to the test's source file,
+        ///    when that file is present on this machine.
+        ///    Recording writes here,
         ///    and playback reads from here when the archive exists.
         /// 4. A bundle set with `.playbackIsolated(replaysFrom:)`.
-        /// 5. Any loaded bundle that contains `Replays/<name>.har` as a resource.
-        /// 6. `Replays/` under the current working directory.
+        /// 5. Any loaded bundle that contains `<directory>/<name>.har` as a resource.
+        /// 6. `<directory>/` under the current working directory.
         func resolveArchiveURL(name: String, test: Test, recordMode: Replay.RecordMode) async throws -> URL {
             let fileName = "\(normalizeArchiveName(name)).har"
             let isRecording = recordMode != .none
@@ -568,9 +570,10 @@ import Foundation
 
         /// Creates an isolation trait that resolves archives from a bundle resource directory.
         ///
-        /// The bundle is a playback fallback:
-        /// an archive next to the test's source file takes precedence when it exists,
-        /// and recording always writes next to the source file
+        /// The bundle is a playback fallback.
+        /// When the test's source file is present on this machine,
+        /// an archive next to it takes precedence for playback,
+        /// and recording writes there rather than into the bundle
         /// (bundles are rebuilt on every build, so an archive recorded into one is lost).
         ///
         /// - Parameters:
