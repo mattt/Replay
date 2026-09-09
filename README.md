@@ -245,7 +245,8 @@ import Replay
 
 #### Xcode: Include fixtures as test resources
 
-Add your `Replays/` folder to the test target and ensure it's included in the test bundle resources.
+Add your `Replays/` folder to the test target as a folder reference
+so it's copied into the test bundle with its name intact.
 
 Use the `.playbackIsolated` test suite trait
 to point Replay at your test bundle's resources:
@@ -257,15 +258,15 @@ import Replay
 
 private final class TestBundleToken {}
 
-@Suite(
-    .playbackIsolated(
-        replaysRootURL: Bundle(for: TestBundleToken.self)
-            .resourceURL?
-            .appendingPathComponent("Replays")
-    )
-)
+@Suite(.playbackIsolated(replaysFrom: Bundle(for: TestBundleToken.self)))
 struct YourSuite { /* ... */ }
 ```
+
+The bundle is a fallback for playback.
+When the test's source file is present on the machine running the tests,
+Replay reads archives from the `Replays/` directory next to it,
+and always records there,
+so recordings land in your project rather than in a build product.
 
 ### 2. Write a test using `.replay("…")`
 
