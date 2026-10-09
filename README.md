@@ -409,6 +409,16 @@ func fetchUser() async throws { /* ... */ }
 For request/response bodies, use `Filter.body(replacing:with:)` for string redaction
 or `Filter.body(decoding:transform:)` to transform decoded JSON.
 
+Query filters change both the recorded URL and its HAR query list.
+Supply the same query filters when recording and playing back an archive.
+The built-in `.url` and `.query` matchers apply those policies to both URLs,
+so redacted values match while retained query values still distinguish requests.
+Header, body, and custom filters do not run during matching,
+and custom matchers receive the original requests.
+Archives do not store filter policies; playback without those policies uses strict matching.
+If an imported URL or its query cannot be parsed safely,
+query filters remove the full URL query and HAR query list to prevent secrets from remaining in the archive.
+
 ### Stubs
 
 For simple cases, use inline stubs instead of HAR files:

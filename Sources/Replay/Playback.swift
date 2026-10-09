@@ -79,6 +79,7 @@ public struct PlaybackConfiguration: Sendable {
     public let matchers: [Matcher]
 
     /// Filters applied to entries as they are recorded.
+    /// Built-in query filters also normalize URLs for `.url` and `.query` playback matching.
     public let filters: [Filter]
 
     /// A source of recorded traffic for playback.
@@ -103,6 +104,7 @@ public struct PlaybackConfiguration: Sendable {
     ///   - recordMode: Whether and how to record fixtures.
     ///   - matchers: Matchers used to match incoming requests to entries.
     ///   - filters: Filters applied to newly recorded entries.
+    ///     Built-in query filters also apply during URL and query matching.
     public init(
         source: Source,
         playbackMode: Replay.PlaybackMode = .strict,
@@ -606,7 +608,7 @@ public actor PlaybackStore {
 
         // `.live` ignores any recorded entries and always hits the network.
         if effectivePlaybackMode != .live,
-            let entry = config.matchers.firstMatch(for: request, in: entries)
+            let entry = config.matchers.firstMatch(for: request, in: entries, filters: config.filters)
         {
             let (response, data) = try entry.toURLResponse()
             return .recorded(response, data)
