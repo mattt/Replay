@@ -415,7 +415,7 @@ such as `[.method, .host, .path]`.
 The default `.url` matcher compares the complete URL,
 so a live token will not match its filtered value in an archive.
 If an imported URL or its query cannot be parsed safely,
-query filters remove the full query to prevent secrets from remaining in the URL.
+query filters remove the full URL query and HAR query list to prevent secrets from remaining in the archive.
 
 ### Stubs
 

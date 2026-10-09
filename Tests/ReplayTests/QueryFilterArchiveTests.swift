@@ -106,12 +106,17 @@ struct QueryFilterArchiveTests {
         ] {
             var entry = try makeEntry(URLRequest(url: URL(string: "https://example.com/")!))
             entry.request.url = url
-            entry.request.queryString = [HAR.QueryParameter(name: "token", value: "query-secret")]
+            entry.request.queryString = [
+                HAR.QueryParameter(name: "token", value: "query-secret"),
+                HAR.QueryParameter(name: "page", value: "additional-query-secret"),
+            ]
 
             let redacted = await Filter.queryParameters("token").apply(to: entry)
             let kept = await Filter.queryParameters(keeping: ["page"]).apply(to: entry)
             #expect(redacted.request.url == expectedURL)
             #expect(kept.request.url == expectedURL)
+            #expect(redacted.request.queryString.isEmpty)
+            #expect(kept.request.queryString.isEmpty)
             let redactedArchive = try encodedArchive(redacted)
             let keptArchive = try encodedArchive(kept)
             #expect(!redactedArchive.contains("query-secret"))

@@ -52,22 +52,26 @@ public enum Filter: Sendable {
         case .queryParameters(let names, let replacement):
             var modified = entry
 
-            modified.request.url = Self.filterQuery(in: entry.request.url) { item in
+            let query = Self.filterQuery(in: entry.request.url) { item in
                 names.contains(item.name)
                     ? URLQueryItem(name: item.name, value: replacement)
                     : item
             }
 
-            modified.request.queryString = entry.request.queryString.map { param in
-                if names.contains(param.name) {
-                    return HAR.QueryParameter(
-                        name: param.name,
-                        value: replacement,
-                        comment: param.comment
-                    )
+            modified.request.url = query.url
+            modified.request.queryString =
+                query.removedUnsafeQuery
+                ? []
+                : entry.request.queryString.map { param in
+                    if names.contains(param.name) {
+                        return HAR.QueryParameter(
+                            name: param.name,
+                            value: replacement,
+                            comment: param.comment
+                        )
+                    }
+                    return param
                 }
-                return param
-            }
 
             return modified
 
@@ -110,15 +114,15 @@ public enum Filter: Sendable {
     private static func filterQuery(
         in url: String,
         transform: (URLQueryItem) -> URLQueryItem?
-    ) -> String {
+    ) -> (url: String, removedUnsafeQuery: Bool) {
         guard var components = URLComponents(string: url) else {
-            return removingQuery(from: url)
+            return (removingQuery(from: url), true)
         }
-        guard components.percentEncodedQuery != nil else { return url }
+        guard components.percentEncodedQuery != nil else { return (url, false) }
         guard let items = components.queryItems,
             let encodedItems = components.percentEncodedQueryItems
         else {
-            return removingQuery(from: url)
+            return (removingQuery(from: url), true)
         }
         guard
             encodedItems.allSatisfy({ item in
@@ -126,7 +130,7 @@ public enum Filter: Sendable {
                     && (item.value == nil || item.value?.removingPercentEncoding != nil)
             })
         else {
-            return removingQuery(from: url)
+            return (removingQuery(from: url), true)
         }
         let filtered = zip(items, encodedItems).compactMap { item, encodedItem -> URLQueryItem? in
             guard let transformed = transform(item) else { return nil }
@@ -136,9 +140,12 @@ public enum Filter: Sendable {
             replacement.queryItems = [transformed]
             return replacement.percentEncodedQueryItems?.first
         }
-        guard filtered != encodedItems else { return url }
+        guard filtered != encodedItems else { return (url, false) }
         components.percentEncodedQueryItems = filtered.isEmpty ? nil : filtered
-        return components.string ?? removingQuery(from: url)
+        guard let filteredURL = components.string else {
+            return (removingQuery(from: url), true)
+        }
+        return (filteredURL, false)
     }
 
     private static func removingQuery(from url: String) -> String {
@@ -233,12 +240,16 @@ extension Filter {
         let allowlist = Set(parameters)
         return .custom { entry in
             var modified = entry
-            modified.request.url = Self.filterQuery(in: entry.request.url) { item in
+            let query = Self.filterQuery(in: entry.request.url) { item in
                 allowlist.contains(item.name) ? item : nil
             }
-            modified.request.queryString = entry.request.queryString.filter { param in
-                allowlist.contains(param.name)
-            }
+            modified.request.url = query.url
+            modified.request.queryString =
+                query.removedUnsafeQuery
+                ? []
+                : entry.request.queryString.filter { param in
+                    allowlist.contains(param.name)
+                }
             return modified
         }
     }
