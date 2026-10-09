@@ -9,7 +9,7 @@ public enum Filter: Sendable {
     /// in lowercase (see `Filter.headers(removing:replacement:)`).
     case headers(names: Set<String>, replacement: String)
 
-    /// Redacts URL query parameter values (in the request) whose names match `names`.
+    /// Redacts query parameter values in both the request URL and the HAR query list.
     case queryParameters(names: Set<String>, replacement: String)
 
     /// Replaces occurrences of `pattern` with `replacement` in request/response bodies when present.
@@ -51,6 +51,14 @@ public enum Filter: Sendable {
 
         case .queryParameters(let names, let replacement):
             var modified = entry
+
+            modified.request.url = Self.filterQuery(in: entry.request.url) { items in
+                items.map { item in
+                    names.contains(item.name)
+                        ? URLQueryItem(name: item.name, value: replacement)
+                        : item
+                }
+            }
 
             modified.request.queryString = entry.request.queryString.map { param in
                 if names.contains(param.name) {
@@ -99,6 +107,19 @@ public enum Filter: Sendable {
         case .custom(let transform):
             return await transform(entry)
         }
+    }
+
+    private static func filterQuery(
+        in url: String,
+        transform: ([URLQueryItem]) -> [URLQueryItem]
+    ) -> String {
+        guard var components = URLComponents(string: url), let items = components.queryItems else {
+            return url
+        }
+        let filtered = transform(items)
+        guard filtered != items else { return url }
+        components.queryItems = filtered.isEmpty ? nil : filtered
+        return components.string ?? url
     }
 }
 
@@ -187,6 +208,9 @@ extension Filter {
         let allowlist = Set(parameters)
         return .custom { entry in
             var modified = entry
+            modified.request.url = Self.filterQuery(in: entry.request.url) { items in
+                items.filter { allowlist.contains($0.name) }
+            }
             modified.request.queryString = entry.request.queryString.filter { param in
                 allowlist.contains(param.name)
             }

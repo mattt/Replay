@@ -1,0 +1,97 @@
+import Foundation
+
+#if canImport(FoundationNetworking)
+    import FoundationNetworking
+#endif
+import Testing
+
+@testable import Replay
+
+@Suite("Query filter archive tests")
+struct QueryFilterArchiveTests {
+    @Test("Redaction removes repeated and encoded query secrets from the archive")
+    func redactsURLAndQueryList() async throws {
+        let request = URLRequest(
+            url: URL(
+                string: "https://example.com/items?to%6Ben=query-secret-one&token=query-secret-two&page=1#section")!
+        )
+        let entry = try makeEntry(request)
+        let filtered = await Filter.queryParameters("token").apply(to: entry)
+        let items = try #require(URLComponents(string: filtered.request.url)?.queryItems)
+
+        #expect(items.map(\.name) == ["token", "token", "page"])
+        #expect(items.map(\.value) == ["[FILTERED]", "[FILTERED]", "1"])
+        #expect(filtered.request.queryString.map(\.value) == ["[FILTERED]", "[FILTERED]", "1"])
+        #expect(URLComponents(string: filtered.request.url)?.fragment == "section")
+        let archive = try encodedArchive(filtered)
+        #expect(!archive.contains("query-secret-one"))
+        #expect(!archive.contains("query-secret-two"))
+
+        let store = PlaybackStore()
+        try await store.configure(
+            PlaybackConfiguration(source: .entries([filtered]), matchers: [.method, .host, .path])
+        )
+        let (response, data) = try await store.handleRequest(request)
+        #expect(response.statusCode == 200)
+        #expect(data == Data("response".utf8))
+    }
+
+    @Test("Allowlisting removes query secrets from both stored representations")
+    func keepsAllowedParameters() async throws {
+        let request = URLRequest(url: URL(string: "https://example.com/?token=query-secret&page=1&page=2")!)
+        let filtered = try await Filter.queryParameters(keeping: ["page"]).apply(to: makeEntry(request))
+
+        #expect(filtered.request.url == "https://example.com/?page=1&page=2")
+        #expect(filtered.request.queryString.map(\.name) == ["page", "page"])
+        let archive = try encodedArchive(filtered)
+        #expect(!archive.contains("query-secret"))
+    }
+
+    @Test("An empty allowlist removes the URL query")
+    func removesAllParameters() async throws {
+        let entry = try makeEntry(URLRequest(url: URL(string: "https://example.com/?token=query-secret#section")!))
+        let filtered = await Filter.queryParameters(keeping: [String]()).apply(to: entry)
+
+        #expect(filtered.request.url == "https://example.com/#section")
+        #expect(filtered.request.queryString.isEmpty)
+        let archive = try encodedArchive(filtered)
+        #expect(!archive.contains("query-secret"))
+    }
+
+    @Test("Unchanged URLs retain their original encoding")
+    func preservesUnchangedURL() async throws {
+        let request = URLRequest(url: URL(string: "https://example.com/?TOKEN=allowed&path=%2f&a&b=#section")!)
+        let entry = try makeEntry(request)
+        let redacted = await Filter.queryParameters("token").apply(to: entry)
+        let kept = await Filter.queryParameters(keeping: ["TOKEN", "path", "a", "b"]).apply(to: entry)
+
+        #expect(redacted.request.url == entry.request.url)
+        #expect(kept.request.url == entry.request.url)
+        #expect(redacted.request.queryString == entry.request.queryString)
+    }
+
+    @Test("Custom replacements preserve query syntax")
+    func escapesReplacement() async throws {
+        let entry = try makeEntry(URLRequest(url: URL(string: "https://example.com/?token=secret&page=1")!))
+        let filtered = await Filter.queryParameters("token", replacement: "a&b=c#d").apply(to: entry)
+        let items = try #require(URLComponents(string: filtered.request.url)?.queryItems)
+
+        #expect(items == [URLQueryItem(name: "token", value: "a&b=c#d"), URLQueryItem(name: "page", value: "1")])
+    }
+
+    private func makeEntry(_ request: URLRequest) throws -> HAR.Entry {
+        try HAR.Entry(
+            request: request,
+            response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!,
+            data: Data("response".utf8),
+            startTime: Date(),
+            duration: 0
+        )
+    }
+
+    private func encodedArchive(_ entry: HAR.Entry) throws -> String {
+        var log = HAR.create()
+        log.entries = [entry]
+        return String(decoding: try HAR.encode(log), as: UTF8.self)
+    }
+}

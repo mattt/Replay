@@ -409,6 +409,12 @@ func fetchUser() async throws { /* ... */ }
 For request/response bodies, use `Filter.body(replacing:with:)` for string redaction
 or `Filter.body(decoding:transform:)` to transform decoded JSON.
 
+Query filters change both the recorded URL and its HAR query list.
+If you filter query parameters, choose matchers that exclude those values,
+such as `[.method, .host, .path]`.
+The default `.url` matcher compares the complete URL,
+so a live token will not match its filtered value in an archive.
+
 ### Stubs
 
 For simple cases, use inline stubs instead of HAR files:
