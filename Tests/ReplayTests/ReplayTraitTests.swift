@@ -10,6 +10,15 @@ import Testing
 @Suite("ReplayTrait Tests", .serialized, .playbackIsolated)
 struct ReplayTraitTests {
 
+    @Test("Custom matchers and test scope do not require explicit filters")
+    func defaultsFiltersForTestScope() async throws {
+        let trait: ReplayTrait = .replay("missing_default_filters_fixture", matching: [.method, .path], scope: .test)
+
+        await #expect(throws: ReplayError.self) {
+            try await trait.provideScope(for: Test.current!, testCase: nil, performing: {})
+        }
+    }
+
     @Test("Trait throws archiveMissing when archive doesn't exist")
     func archiveMissingError() async throws {
         let trait = ReplayTrait("nonexistent_archive", directory: NSTemporaryDirectory())

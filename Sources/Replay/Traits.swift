@@ -402,7 +402,7 @@ import Foundation
         public static func replay(
             _ name: String? = nil,
             matching matchers: [Matcher],
-            filters: [Filter],
+            filters: [Filter] = [],
             directory: String = "Replays",
             rootURL: URL? = nil,
             scope: ReplayScope = .global
