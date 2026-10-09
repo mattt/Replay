@@ -52,12 +52,10 @@ public enum Filter: Sendable {
         case .queryParameters(let names, let replacement):
             var modified = entry
 
-            modified.request.url = Self.filterQuery(in: entry.request.url) { items in
-                items.map { item in
-                    names.contains(item.name)
-                        ? URLQueryItem(name: item.name, value: replacement)
-                        : item
-                }
+            modified.request.url = Self.filterQuery(in: entry.request.url) { item in
+                names.contains(item.name)
+                    ? URLQueryItem(name: item.name, value: replacement)
+                    : item
             }
 
             modified.request.queryString = entry.request.queryString.map { param in
@@ -111,14 +109,24 @@ public enum Filter: Sendable {
 
     private static func filterQuery(
         in url: String,
-        transform: ([URLQueryItem]) -> [URLQueryItem]
+        transform: (URLQueryItem) -> URLQueryItem?
     ) -> String {
-        guard var components = URLComponents(string: url), let items = components.queryItems else {
+        guard var components = URLComponents(string: url),
+            let items = components.queryItems,
+            let encodedItems = components.percentEncodedQueryItems
+        else {
             return url
         }
-        let filtered = transform(items)
-        guard filtered != items else { return url }
-        components.queryItems = filtered.isEmpty ? nil : filtered
+        let filtered = zip(items, encodedItems).compactMap { item, encodedItem -> URLQueryItem? in
+            guard let transformed = transform(item) else { return nil }
+            if transformed == item { return encodedItem }
+
+            var replacement = URLComponents()
+            replacement.queryItems = [transformed]
+            return replacement.percentEncodedQueryItems?.first
+        }
+        guard filtered != encodedItems else { return url }
+        components.percentEncodedQueryItems = filtered.isEmpty ? nil : filtered
         return components.string ?? url
     }
 }
@@ -208,8 +216,8 @@ extension Filter {
         let allowlist = Set(parameters)
         return .custom { entry in
             var modified = entry
-            modified.request.url = Self.filterQuery(in: entry.request.url) { items in
-                items.filter { allowlist.contains($0.name) }
+            modified.request.url = Self.filterQuery(in: entry.request.url) { item in
+                allowlist.contains(item.name) ? item : nil
             }
             modified.request.queryString = entry.request.queryString.filter { param in
                 allowlist.contains(param.name)

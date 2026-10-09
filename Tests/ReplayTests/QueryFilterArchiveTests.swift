@@ -79,6 +79,23 @@ struct QueryFilterArchiveTests {
         #expect(items == [URLQueryItem(name: "token", value: "a&b=c#d"), URLQueryItem(name: "page", value: "1")])
     }
 
+    @Test("Filtering preserves the raw encoding of unrelated parameters")
+    func preservesEncodingWhileFiltering() async throws {
+        let request = URLRequest(
+            url: URL(string: "https://example.com/?token=query-secret&path=%2f&encoded=%41&space=+&a&b=")!
+        )
+        let entry = try makeEntry(request)
+        let redacted = await Filter.queryParameters("token", replacement: "redacted").apply(to: entry)
+        let kept = await Filter.queryParameters(keeping: ["path", "encoded", "space", "a", "b"]).apply(to: entry)
+
+        #expect(redacted.request.url == "https://example.com/?token=redacted&path=%2f&encoded=%41&space=+&a&b=")
+        #expect(kept.request.url == "https://example.com/?path=%2f&encoded=%41&space=+&a&b=")
+        let redactedArchive = try encodedArchive(redacted)
+        let keptArchive = try encodedArchive(kept)
+        #expect(!redactedArchive.contains("query-secret"))
+        #expect(!keptArchive.contains("query-secret"))
+    }
+
     private func makeEntry(_ request: URLRequest) throws -> HAR.Entry {
         try HAR.Entry(
             request: request,
