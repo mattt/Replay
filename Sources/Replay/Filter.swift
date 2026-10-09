@@ -12,6 +12,9 @@ public enum Filter: Sendable {
     /// Redacts query parameter values in both the request URL and the HAR query list.
     case queryParameters(names: Set<String>, replacement: String)
 
+    /// Keeps only the named query parameters in the URL and HAR query list.
+    case queryAllowlist(names: Set<String>)
+
     /// Replaces occurrences of `pattern` with `replacement` in request/response bodies when present.
     ///
     /// This is a simple string replacement and is best suited to text formats (JSON, XML, etc).
@@ -75,6 +78,20 @@ public enum Filter: Sendable {
 
             return modified
 
+        case .queryAllowlist(let names):
+            var modified = entry
+            let query = Self.filterQuery(in: entry.request.url) { item in
+                names.contains(item.name) ? item : nil
+            }
+            modified.request.url = query.url
+            modified.request.queryString =
+                query.removedUnsafeQuery
+                ? []
+                : entry.request.queryString.filter {
+                    names.contains($0.name)
+                }
+            return modified
+
         case .body(let pattern, let replacement):
             var modified = entry
 
@@ -109,6 +126,27 @@ public enum Filter: Sendable {
         case .custom(let transform):
             return await transform(entry)
         }
+    }
+
+    /// Normalizes only built-in query policies for matching; unsafe queries cannot match.
+    static func matchingURL(_ url: String, filters: [Filter]) -> URL? {
+        var normalized = url
+        for filter in filters {
+            let query: (url: String, removedUnsafeQuery: Bool)
+            switch filter {
+            case .queryParameters(let names, let replacement):
+                query = filterQuery(in: normalized) { item in
+                    names.contains(item.name) ? URLQueryItem(name: item.name, value: replacement) : item
+                }
+            case .queryAllowlist(let names):
+                query = filterQuery(in: normalized) { names.contains($0.name) ? $0 : nil }
+            default:
+                continue
+            }
+            guard !query.removedUnsafeQuery else { return nil }
+            normalized = query.url
+        }
+        return URL(string: normalized)
     }
 
     private static func filterQuery(
@@ -237,21 +275,7 @@ extension Filter {
     ///
     /// Query parameter name matching is case-sensitive and uses exact string equality.
     public static func queryParameters(keeping parameters: [String]) -> Self {
-        let allowlist = Set(parameters)
-        return .custom { entry in
-            var modified = entry
-            let query = Self.filterQuery(in: entry.request.url) { item in
-                allowlist.contains(item.name) ? item : nil
-            }
-            modified.request.url = query.url
-            modified.request.queryString =
-                query.removedUnsafeQuery
-                ? []
-                : entry.request.queryString.filter { param in
-                    allowlist.contains(param.name)
-                }
-            return modified
-        }
+        .queryAllowlist(names: Set(parameters))
     }
 
     /// Keeps only the specified URL query parameters (in the request), removing all others.

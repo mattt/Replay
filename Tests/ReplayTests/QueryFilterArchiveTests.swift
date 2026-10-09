@@ -133,6 +133,67 @@ struct QueryFilterArchiveTests {
         #expect(filtered.request.url == entry.request.url)
     }
 
+    @Test("Default playback applies query policies after recording and reloading")
+    func defaultPlaybackWithQueryPolicies() async throws {
+        for policy in [
+            Filter.queryParameters("token", replacement: "a&b=c#d"),
+            Filter.queryParameters(keeping: ["page", "path"]),
+        ] {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".har")
+            defer { try? FileManager.default.removeItem(at: file) }
+            let store = PlaybackStore()
+            try await store.configure(PlaybackConfiguration(source: .file(file), recordMode: .once, filters: [policy]))
+            for page in [1, 2] {
+                let request = URLRequest(
+                    url: URL(string: "https://example.com/?to%6Ben=secret&token=other&page=\(page)&path=%2f")!)
+                try await store.recordResponse(
+                    request: request,
+                    response: HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                    data: Data("page-\(page)".utf8), duration: 0, startTime: Date()
+                )
+                let (_, data) = try await store.handleRequest(request)
+                #expect(data == Data("page-\(page)".utf8))
+            }
+            let reloaded = PlaybackStore()
+            try await reloaded.configure(PlaybackConfiguration(source: .file(file), filters: [policy]))
+            for page in [1, 2] {
+                let request = URLRequest(
+                    url: URL(string: "https://example.com/?to%6Ben=new&token=new&page=\(page)&path=%2f")!)
+                let (_, data) = try await reloaded.handleRequest(request)
+                #expect(data == Data("page-\(page)".utf8))
+            }
+            let missing = URLRequest(url: URL(string: "https://example.com/?token=new&page=3&path=%2f")!)
+            guard case .error = try await reloaded.checkRequest(missing) else {
+                Issue.record("An unrecorded page must not match")
+                continue
+            }
+            #expect(!(try String(contentsOf: file, encoding: .utf8)).contains("secret"))
+        }
+    }
+
+    @Test("Query policies preserve strict and custom matching contracts")
+    func matchingContracts() async throws {
+        let original = URLRequest(url: URL(string: "https://example.com/?token=secret&page=1&path=%2f")!)
+        let policy = Filter.queryParameters("token")
+        let entry = try await policy.apply(to: makeEntry(original))
+        #expect([Matcher].default.firstMatch(for: original, in: [entry]) == nil)
+        #expect([Matcher].default.firstMatch(for: original, in: [entry], filters: [policy]) != nil)
+        let differentEncoding = URLRequest(url: URL(string: "https://example.com/?token=secret&page=1&path=/")!)
+        #expect([Matcher].default.firstMatch(for: differentEncoding, in: [entry], filters: [policy]) == nil)
+        #expect([Matcher.method, .query].firstMatch(for: original, in: [entry], filters: [policy]) != nil)
+        let custom = Matcher.custom { incoming, _ in incoming.url == original.url }
+        #expect([custom].firstMatch(for: original, in: [entry], filters: [policy]) != nil)
+        let customFilter = Filter.custom { _ in
+            Issue.record("Custom filters must not run during matching")
+            return entry
+        }
+        #expect([Matcher].default.firstMatch(for: original, in: [entry], filters: [customFilter]) == nil)
+        var unsafe = entry
+        unsafe.request.url = "https://example.com/?token=%FF&page=1"
+        #expect([Matcher].default.firstMatch(for: original, in: [unsafe], filters: [policy]) == nil)
+        #expect([Matcher].default.firstMatch(for: original, in: [try makeEntry(original)], filters: [policy]) != nil)
+    }
+
     private func makeEntry(_ request: URLRequest) throws -> HAR.Entry {
         try HAR.Entry(
             request: request,

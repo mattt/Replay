@@ -149,6 +149,10 @@ extension Array where Element == Matcher {
 
     /// Finds the first entry whose request matches according to all matchers.
     public func firstMatch(for request: URLRequest, in entries: [HAR.Entry]) -> HAR.Entry? {
+        firstMatch(for: request, in: entries, filters: [])
+    }
+
+    func firstMatch(for request: URLRequest, in entries: [HAR.Entry], filters: [Filter]) -> HAR.Entry? {
         for entry in entries {
             guard let entryURL = URL(string: entry.request.url) else { continue }
 
@@ -166,7 +170,7 @@ extension Array where Element == Matcher {
                 entryRequest.httpBody = text.data(using: .utf8)
             }
 
-            if matches(request, entryRequest) {
+            if matches(request, entryRequest, candidateURL: entry.request.url, filters: filters) {
                 return entry
             }
         }
@@ -174,10 +178,23 @@ extension Array where Element == Matcher {
         return nil
     }
 
-    private func matches(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
+    private func matches(
+        _ request: URLRequest, _ candidate: URLRequest, candidateURL: String, filters: [Filter]
+    ) -> Bool {
         for matcher in self {
-            if !matcher.test(request, candidate) {
-                return false
+            switch matcher {
+            case .url, .query:
+                guard let incomingURL = request.url,
+                    let normalizedIncoming = Filter.matchingURL(incomingURL.absoluteString, filters: filters),
+                    let normalizedCandidate = Filter.matchingURL(candidateURL, filters: filters)
+                else { return false }
+                var incoming = request
+                var recorded = candidate
+                incoming.url = normalizedIncoming
+                recorded.url = normalizedCandidate
+                if !matcher.test(incoming, recorded) { return false }
+            default:
+                if !matcher.test(request, candidate) { return false }
             }
         }
         return true
