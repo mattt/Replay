@@ -111,11 +111,22 @@ public enum Filter: Sendable {
         in url: String,
         transform: (URLQueryItem) -> URLQueryItem?
     ) -> String {
-        guard var components = URLComponents(string: url),
-            let items = components.queryItems,
+        guard var components = URLComponents(string: url) else {
+            return removingQuery(from: url)
+        }
+        guard components.percentEncodedQuery != nil else { return url }
+        guard let items = components.queryItems,
             let encodedItems = components.percentEncodedQueryItems
         else {
-            return url
+            return removingQuery(from: url)
+        }
+        guard
+            encodedItems.allSatisfy({ item in
+                item.name.removingPercentEncoding != nil
+                    && (item.value == nil || item.value?.removingPercentEncoding != nil)
+            })
+        else {
+            return removingQuery(from: url)
         }
         let filtered = zip(items, encodedItems).compactMap { item, encodedItem -> URLQueryItem? in
             guard let transformed = transform(item) else { return nil }
@@ -127,7 +138,13 @@ public enum Filter: Sendable {
         }
         guard filtered != encodedItems else { return url }
         components.percentEncodedQueryItems = filtered.isEmpty ? nil : filtered
-        return components.string ?? url
+        return components.string ?? removingQuery(from: url)
+    }
+
+    private static func removingQuery(from url: String) -> String {
+        let fragment = url.firstIndex(of: "#") ?? url.endIndex
+        guard let query = url[..<fragment].firstIndex(of: "?") else { return url }
+        return String(url[..<query]) + String(url[fragment...])
     }
 }
 

@@ -96,6 +96,38 @@ struct QueryFilterArchiveTests {
         #expect(!keptArchive.contains("query-secret"))
     }
 
+    @Test("Unsafe imported URLs lose their query instead of retaining secrets")
+    func removesUnparseableQueries() async throws {
+        for (url, expectedURL) in [
+            ("https://exa mple.com/?token=query-secret#section", "https://exa mple.com/#section"),
+            ("https://[invalid/?token=query-secret&page=1", "https://[invalid/"),
+            ("https://example.com/?token=query-secret&bad=%FF", "https://example.com/"),
+            ("https://example.com/?%FF=query-secret", "https://example.com/"),
+        ] {
+            var entry = try makeEntry(URLRequest(url: URL(string: "https://example.com/")!))
+            entry.request.url = url
+            entry.request.queryString = [HAR.QueryParameter(name: "token", value: "query-secret")]
+
+            let redacted = await Filter.queryParameters("token").apply(to: entry)
+            let kept = await Filter.queryParameters(keeping: ["page"]).apply(to: entry)
+            #expect(redacted.request.url == expectedURL)
+            #expect(kept.request.url == expectedURL)
+            let redactedArchive = try encodedArchive(redacted)
+            let keptArchive = try encodedArchive(kept)
+            #expect(!redactedArchive.contains("query-secret"))
+            #expect(!keptArchive.contains("query-secret"))
+        }
+    }
+
+    @Test("Malformed URLs without a query retain their path and fragment")
+    func preservesMalformedURLWithoutQuery() async throws {
+        var entry = try makeEntry(URLRequest(url: URL(string: "https://example.com/")!))
+        entry.request.url = "https://[invalid]/#section?token=fragment-value"
+        let filtered = await Filter.queryParameters("token").apply(to: entry)
+
+        #expect(filtered.request.url == entry.request.url)
+    }
+
     private func makeEntry(_ request: URLRequest) throws -> HAR.Entry {
         try HAR.Entry(
             request: request,
