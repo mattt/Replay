@@ -4,6 +4,7 @@ import Foundation
 /// they are persisted to disk or inspected.
 public enum Filter: Sendable {
     /// Redacts HTTP header values (in both the request and response) whose names match `names`.
+    /// Filtering `Cookie` or `Set-Cookie` also redacts the corresponding HAR cookie values.
     ///
     /// Header name matching is expected to be performed case-insensitively by storing `names`
     /// in lowercase (see `Filter.headers(removing:replacement:)`).
@@ -45,6 +46,21 @@ public enum Filter: Sendable {
                         name: header.name, value: replacement, comment: header.comment)
                 }
                 return header
+            }
+
+            if names.contains("cookie") {
+                modified.request.cookies = entry.request.cookies.map { cookie in
+                    var filtered = cookie
+                    filtered.value = replacement
+                    return filtered
+                }
+            }
+            if names.contains("set-cookie") {
+                modified.response.cookies = entry.response.cookies.map { cookie in
+                    var filtered = cookie
+                    filtered.value = replacement
+                    return filtered
+                }
             }
 
             return modified
@@ -141,6 +157,12 @@ extension Filter {
             }
             modified.response.headers = entry.response.headers.filter { header in
                 allowlist.contains(header.name.lowercased())
+            }
+            if !allowlist.contains("cookie") {
+                modified.request.cookies = []
+            }
+            if !allowlist.contains("set-cookie") {
+                modified.response.cookies = []
             }
             return modified
         }
