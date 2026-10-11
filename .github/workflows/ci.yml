@@ -9,7 +9,7 @@ on:
 jobs:
   test-macos:
     name: Swift ${{ matrix.swift }} on macOS ${{ matrix.macos }} with Xcode ${{ matrix.xcode }}${{ matrix.variant == 'async_http_client' && ' (AsyncHTTPClient)' || '' }}
-    runs-on: macos-${{ matrix.macos }}
+    runs-on: ${{ matrix.runner }}
     env:
       DEVELOPER_DIR: "/Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer"
     strategy:
@@ -19,18 +19,42 @@ jobs:
           - swift: "6.1"
             xcode: "16.3"
             macos: "15"
+            runner: macos-15
             variant: default
           - swift: "6.2"
             xcode: "26.0"
             macos: "26"
+            runner: macos-26
             variant: default
           - swift: "6.1"
             xcode: "16.3"
             macos: "15"
+            runner: macos-15
             variant: async_http_client
           - swift: "6.2"
             xcode: "26.0"
             macos: "26"
+            runner: macos-26
+            variant: async_http_client
+          - swift: "6.3"
+            xcode: "26.4.1"
+            macos: "26"
+            runner: macos-26
+            variant: default
+          - swift: "6.4"
+            xcode: "27.0"
+            macos: "27"
+            runner: xcode-27
+            variant: default
+          - swift: "6.3"
+            xcode: "26.4.1"
+            macos: "26"
+            runner: macos-26
+            variant: async_http_client
+          - swift: "6.4"
+            xcode: "27.0"
+            macos: "27"
+            runner: xcode-27
             variant: async_http_client
     timeout-minutes: 10
     steps:
@@ -82,6 +106,14 @@ jobs:
           - swift-version: "6.1.3"
             variant: async_http_client
           - swift-version: "6.2.3"
+            variant: async_http_client
+          - swift-version: "6.3.3"
+            variant: default
+          - swift-version: "6.4.0"
+            variant: default
+          - swift-version: "6.3.3"
+            variant: async_http_client
+          - swift-version: "6.4.0"
             variant: async_http_client
     timeout-minutes: 10
     steps:
