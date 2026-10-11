@@ -11,7 +11,7 @@ final class RecordingHTTPServer: @unchecked Sendable {
     let url: URL
     private let listener: Int32
 
-    init(response: String) throws {
+    init(response: String, holdOpen: Bool = false) throws {
         #if canImport(Darwin)
             let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         #else
@@ -65,6 +65,10 @@ final class RecordingHTTPServer: @unchecked Sendable {
                     guard count > 0 else { return }
                     sent += count
                 }
+            }
+            if holdOpen {
+                // Wait for the recording flush to cancel its transport.
+                while recv(client, &buffer, buffer.count, 0) > 0 {}
             }
         }
     }
