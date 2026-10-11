@@ -40,11 +40,13 @@ struct RecordingStreamErrorTests {
         #expect(!FileManager.default.fileExists(atPath: archive.path))
     }
     #if !canImport(FoundationNetworking)
-        @Test("Explicit flushing still records an active event stream once")
-        func flushEventStream() async throws {
+        @Test(
+            "Explicit flushing records an active stream once",
+            arguments: ["text/event-stream", "application/x-ndjson"])
+        func flushEventStream(contentType: String) async throws {
             let body = "data: hello\n\n"
             let server = try RecordingHTTPServer(
-                response: "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n" + body,
+                response: "HTTP/1.1 200 OK\r\nContent-Type: \(contentType)\r\nConnection: close\r\n\r\n" + body,
                 holdOpen: true
             )
             defer { withExtendedLifetime(server) {} }

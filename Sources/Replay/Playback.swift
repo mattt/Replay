@@ -313,8 +313,8 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     let capturedRequest = matchingRequest
                     let capturedResponse = httpResponse
 
-                    // Only event streams can be deliberately saved before transport completion.
-                    if shouldRecord, httpResponse.mimeType?.lowercased() == "text/event-stream" {
+                    // Explicit flushing can finish any active streaming recording.
+                    if shouldRecord {
                         await store.registerStreamingProtocol(id: protocolId) { [state, sendableDataTask] in
                             guard let data = state.finish() else { return }
                             let duration = Date().timeIntervalSince(startTime)
@@ -350,10 +350,11 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                         }
                         try Task.checkCancellation()
                     } catch {
+                        let failed = state.fail()
                         await store.unregisterStreamingProtocol(id: protocolId)
                         // A flush already saved the stream and deliberately cancelled its transport.
                         // Otherwise, preserve the transport failure and do not save a partial fixture.
-                        if state.fail() { throw error }
+                        if failed { throw error }
                     }
 
                     // Record if loop exited naturally (not via flush)
