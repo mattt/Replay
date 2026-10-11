@@ -292,10 +292,10 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                             return true
                         }
 
-                        func finish() -> Data? {
+                        func finish(requireBody: Bool = false) -> Data? {
                             lock.lock()
                             defer { lock.unlock() }
-                            guard !finished, !collectedData.isEmpty else { return nil }
+                            guard !finished, !requireBody || !collectedData.isEmpty else { return nil }
                             finished = true
                             return collectedData
                         }
@@ -316,7 +316,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     // Explicit flushing can finish any active streaming recording.
                     if shouldRecord {
                         await store.registerStreamingProtocol(id: protocolId) { [state, sendableDataTask] in
-                            guard let data = state.finish() else { return }
+                            guard let data = state.finish(requireBody: true) else { return }
                             let duration = Date().timeIntervalSince(startTime)
                             do {
                                 try await store.recordResponse(
