@@ -252,6 +252,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     config.timeoutIntervalForRequest = .infinity
                     config.timeoutIntervalForResource = .infinity
                     let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+                    defer { session.invalidateAndCancel() }
                     let dataTask = session.dataTask(with: matchingRequest)
                     let sendableDataTask = UnsafeSendable(value: dataTask)
 
@@ -271,25 +272,49 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     // Stream data incrementally, collecting for potential recording
                     // Use a class to allow capturing in the finish handler
                     final class StreamState: @unchecked Sendable {
-                        var collectedData = Data()
-                        var finished = false
+                        private let lock = NSLock()
+                        private var collectedData = Data()
+                        private var finished = false
+
+                        func append(_ chunk: Data) -> Bool {
+                            lock.lock()
+                            defer { lock.unlock() }
+                            guard !finished else { return false }
+                            collectedData.append(chunk)
+                            return true
+                        }
+
+                        func finish() -> Data? {
+                            lock.lock()
+                            defer { lock.unlock() }
+                            guard !finished, !collectedData.isEmpty else { return nil }
+                            finished = true
+                            return collectedData
+                        }
+
+                        func fail() -> Bool {
+                            lock.lock()
+                            defer { lock.unlock() }
+                            guard !finished else { return false }
+                            finished = true
+                            return true
+                        }
                     }
                     let state = StreamState()
                     let protocolId = ObjectIdentifier(urlProtocol)
                     let capturedRequest = matchingRequest
                     let capturedResponse = httpResponse
 
-                    // Register finish handler for flush()
-                    if shouldRecord {
+                    // Only event streams can be deliberately saved before transport completion.
+                    if shouldRecord, httpResponse.mimeType?.lowercased() == "text/event-stream" {
                         await store.registerStreamingProtocol(id: protocolId) { [state, sendableDataTask] in
-                            guard !state.finished, !state.collectedData.isEmpty else { return }
-                            state.finished = true
+                            guard let data = state.finish() else { return }
                             let duration = Date().timeIntervalSince(startTime)
                             do {
                                 try await store.recordResponse(
                                     request: capturedRequest,
                                     response: capturedResponse,
-                                    data: state.collectedData,
+                                    data: data,
                                     duration: duration,
                                     startTime: startTime
                                 )
@@ -308,27 +333,30 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     do {
                         try await withTaskCancellationHandler {
                             for try await chunk in dataStream {
-                                if Task.isCancelled || state.finished { break }
-                                state.collectedData.append(chunk)
+                                try Task.checkCancellation()
+                                guard state.append(chunk) else { break }
                                 urlProtocol.client?.urlProtocol(urlProtocol, didLoad: chunk)
                             }
                         } onCancel: {
                             urlTask.cancel()
                         }
+                        try Task.checkCancellation()
                     } catch {
-                        // Ignore errors (including cancellation) and proceed to recording
+                        await store.unregisterStreamingProtocol(id: protocolId)
+                        // A flush already saved the stream and deliberately cancelled its transport.
+                        // Otherwise, preserve the transport failure and do not save a partial fixture.
+                        if state.fail() { throw error }
                     }
 
                     // Record if loop exited naturally (not via flush)
-                    if shouldRecord, !state.finished, !state.collectedData.isEmpty {
-                        state.finished = true
-                        await store.unregisterStreamingProtocol(id: protocolId)
+                    await store.unregisterStreamingProtocol(id: protocolId)
+                    if shouldRecord, let data = state.finish() {
                         let duration = Date().timeIntervalSince(startTime)
                         do {
                             try await store.recordResponse(
                                 request: matchingRequest,
                                 response: httpResponse,
-                                data: state.collectedData,
+                                data: data,
                                 duration: duration,
                                 startTime: startTime
                             )
@@ -339,7 +367,6 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                         }
                     }
 
-                    session.invalidateAndCancel()
                     urlProtocol.client?.urlProtocolDidFinishLoading(urlProtocol)
                 }
             } catch {
