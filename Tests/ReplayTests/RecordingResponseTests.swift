@@ -20,6 +20,9 @@ struct RecordingResponseTests {
         request.httpMethod = method
         let session = try await Playback.session(configuration: .init(source: .file(archive), recordMode: .once))
         defer { session.invalidateAndCancel() }
+        let key = try #require(
+            session.configuration.httpAdditionalHeaders?[ReplayProtocolContext.headerName] as? String)
+        request.setValue(key, forHTTPHeaderField: ReplayProtocolContext.headerName)
         let (data, response) = try await session.data(for: request)
         #expect(data.isEmpty)
         #expect((response as? HTTPURLResponse)?.statusCode == status)
@@ -29,6 +32,9 @@ struct RecordingResponseTests {
         #expect(log.entries.first?.response.status == status)
         let replay = try await Playback.session(configuration: .init(source: .file(archive)))
         defer { replay.invalidateAndCancel() }
+        let replayKey = try #require(
+            replay.configuration.httpAdditionalHeaders?[ReplayProtocolContext.headerName] as? String)
+        request.setValue(replayKey, forHTTPHeaderField: ReplayProtocolContext.headerName)
         let (replayedData, replayedResponse) = try await replay.data(for: request)
         #expect(replayedData.isEmpty)
         #expect((replayedResponse as? HTTPURLResponse)?.statusCode == status)
