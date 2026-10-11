@@ -320,7 +320,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     }
 
                     // Record if loop exited naturally (not via flush)
-                    if shouldRecord, !state.finished, !state.collectedData.isEmpty {
+                    if shouldRecord, !state.finished {
                         state.finished = true
                         await store.unregisterStreamingProtocol(id: protocolId)
                         let duration = Date().timeIntervalSince(startTime)
