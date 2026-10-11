@@ -27,8 +27,11 @@ struct RecordingStreamErrorTests {
             session.configuration.httpAdditionalHeaders?[ReplayProtocolContext.headerName] as? String)
         var request = URLRequest(url: server.url)
         request.setValue(key, forHTTPHeaderField: ReplayProtocolContext.headerName)
-        await #expect(throws: Error.self) {
-            try await session.data(for: request)
+        do {
+            _ = try await session.data(for: request)
+            Issue.record("A truncated response must fail")
+        } catch {
+            #expect((error as NSError).domain == NSURLErrorDomain)
         }
         #expect(!FileManager.default.fileExists(atPath: archive.path))
         let store = try #require(PlaybackStoreRegistry.shared.store(for: key))

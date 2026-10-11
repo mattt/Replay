@@ -249,8 +249,16 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     // so authentication challenges can be forwarded to the URLProtocol client that started this load.
                     delegate.urlProtocol = urlProtocol
                     let config = URLSessionConfiguration.ephemeral
-                    config.timeoutIntervalForRequest = .infinity
-                    config.timeoutIntervalForResource = .infinity
+                    #if canImport(FoundationNetworking)
+                        // FoundationNetworking converts request timeouts to integer milliseconds.
+                        // A large finite value avoids trapping when a stream starts on Linux.
+                        let streamingTimeout = TimeInterval(Int32.max / 1000)
+                        config.timeoutIntervalForRequest = streamingTimeout
+                        config.timeoutIntervalForResource = streamingTimeout
+                    #else
+                        config.timeoutIntervalForRequest = .infinity
+                        config.timeoutIntervalForResource = .infinity
+                    #endif
                     let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
                     defer { session.invalidateAndCancel() }
                     let dataTask = session.dataTask(with: matchingRequest)
