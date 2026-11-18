@@ -987,3 +987,193 @@ private func makeTestEntryFor(url: URL, status: Int, body: String) -> HAR.Entry 
         timings: HAR.Timings(send: 10, wait: 80, receive: 10)
     )
 }
+
+// MARK: - Request Bodies
+
+// URLSession hands URLProtocol a request whose body is in httpBodyStream on Darwin.
+// Playback.session routes through an HTTP header that FoundationNetworking does not pass to
+// URLProtocol, so this runs on Darwin only (where the stream behavior lives anyway).
+#if !canImport(FoundationNetworking)
+    @Test("body matcher sees the body of a URLSession request")
+    func bodyMatcherSeesStreamedBody() async throws {
+        func entry(body: String, answer: String) throws -> HAR.Entry {
+            var request = URLRequest(url: URL(string: "https://example.com/form")!)
+            request.httpMethod = "POST"
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.utf8)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/plain"])!
+            return try HAR.Entry(
+                request: request, response: response, data: Data(answer.utf8),
+                startTime: Date(), duration: 0.01)
+        }
+
+        let session = try await Playback.session(
+            configuration: PlaybackConfiguration(
+                source: .entries([try entry(body: "a=1", answer: "1"), try entry(body: "a=2", answer: "2")]),
+                matchers: [.method, .url, .body]
+            )
+        )
+
+        var request = URLRequest(url: URL(string: "https://example.com/form")!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("a=2".utf8)
+
+        let (data, _) = try await session.data(for: request)
+        #expect(String(decoding: data, as: UTF8.self) == "2")
+    }
+    /// The ways `withBodyReadFromStream()` cannot recover a request body in full.
+    enum UnreadableBodyStream: CaseIterable, Sendable {
+        /// A stream that returns one byte, then fails.
+        case failsAfterFirstByte
+        /// A stream that someone else opened and read part of.
+        case alreadyOpened
+        /// A stream that someone else read in full and closed.
+        case alreadyClosed
+
+        func makeStream() -> InputStream {
+            switch self {
+            case .failsAfterFirstByte:
+                return FailingInputStream()
+            case .alreadyOpened:
+                let stream = InputStream(data: Data("AB".utf8))
+                stream.open()
+                var byte: UInt8 = 0
+                _ = stream.read(&byte, maxLength: 1)
+                return stream
+            case .alreadyClosed:
+                let stream = InputStream(data: Data("AB".utf8))
+                stream.open()
+                var buffer = [UInt8](repeating: 0, count: 2)
+                _ = stream.read(&buffer, maxLength: 2)
+                stream.close()
+                return stream
+            }
+        }
+    }
+
+    @Test(
+        "playback fails a request whose body stream cannot be read in full",
+        arguments: UnreadableBodyStream.allCases
+    )
+    func playbackFailsUnreadableBodyStream(_ kind: UnreadableBodyStream) async throws {
+        let url = URL(string: "https://example.com/upload")!
+
+        // Match on the URL only, so a request with a lost body would still get a response.
+        let store = PlaybackStore()
+        try await store.configure(
+            PlaybackConfiguration(
+                source: .entries([makeTestEntryFor(url: url, status: 200, body: "ok")]),
+                matchers: [.url]
+            )
+        )
+        let key = PlaybackStoreRegistry.shared.register(store)
+        defer { PlaybackStoreRegistry.shared.unregister(key: key) }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(key, forHTTPHeaderField: ReplayProtocolContext.headerName)
+        request.httpBodyStream = kind.makeStream()
+
+        let client = LoadOutcomeClient()
+        let urlProtocol = PlaybackURLProtocol(request: request, cachedResponse: nil, client: client)
+        let outcome = await withCheckedContinuation { continuation in
+            client.continuation = continuation
+            urlProtocol.startLoading()
+        }
+        urlProtocol.stopLoading()
+
+        guard case .failed(let error) = outcome else {
+            Issue.record("Expected the request to fail, but it finished loading")
+            return
+        }
+        let urlError = try #require(error as? URLError)
+        #expect(urlError.code == .requestBodyStreamExhausted)
+        if kind == .failsAfterFirstByte {
+            let underlying = try #require(urlError.userInfo[NSUnderlyingErrorKey] as? NSError)
+            #expect(underlying.domain == FailingInputStream.errorDomain)
+        }
+    }
+
+    /// An input stream that returns one byte, then fails.
+    private final class FailingInputStream: InputStream {
+        static let errorDomain = "ReplayTests.FailingInputStream"
+
+        private var status: Stream.Status = .notOpen
+        private var didReadFirstByte = false
+
+        init() {
+            super.init(data: Data())
+        }
+
+        override func open() { status = .open }
+        override func close() { status = .closed }
+        override var streamStatus: Stream.Status { status }
+        override var hasBytesAvailable: Bool { status == .open }
+        override var streamError: Error? {
+            status == .error ? NSError(domain: Self.errorDomain, code: 1) : nil
+        }
+
+        override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength len: Int) -> Int {
+            guard status == .open else { return -1 }
+            if !didReadFirstByte {
+                didReadFirstByte = true
+                buffer[0] = UInt8(ascii: "A")
+                return 1
+            }
+            status = .error
+            return -1
+        }
+    }
+
+    /// How a URL protocol load ended.
+    enum LoadOutcome: Sendable {
+        case finished
+        case failed(any Error)
+    }
+
+    /// A URL protocol client that reports how a load ended.
+    private final class LoadOutcomeClient: NSObject, URLProtocolClient, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _continuation: CheckedContinuation<LoadOutcome, Never>?
+
+        var continuation: CheckedContinuation<LoadOutcome, Never>? {
+            get { lock.withLock { _continuation } }
+            set { lock.withLock { _continuation = newValue } }
+        }
+
+        private func finish(_ outcome: LoadOutcome) {
+            let continuation = lock.withLock {
+                defer { _continuation = nil }
+                return _continuation
+            }
+            continuation?.resume(returning: outcome)
+        }
+
+        func urlProtocol(
+            _ protocol: URLProtocol,
+            wasRedirectedTo request: URLRequest,
+            redirectResponse: URLResponse
+        ) {}
+
+        func urlProtocol(_ protocol: URLProtocol, cachedResponseIsValid cachedResponse: CachedURLResponse) {}
+
+        func urlProtocol(
+            _ protocol: URLProtocol,
+            didReceive response: URLResponse,
+            cacheStoragePolicy policy: URLCache.StoragePolicy
+        ) {}
+
+        func urlProtocol(_ protocol: URLProtocol, didLoad data: Data) {}
+
+        func urlProtocolDidFinishLoading(_ protocol: URLProtocol) { finish(.finished) }
+
+        func urlProtocol(_ protocol: URLProtocol, didFailWithError error: Error) { finish(.failed(error)) }
+
+        func urlProtocol(_ protocol: URLProtocol, didReceive challenge: URLAuthenticationChallenge) {}
+
+        func urlProtocol(_ protocol: URLProtocol, didCancel challenge: URLAuthenticationChallenge) {}
+    }
+#endif
