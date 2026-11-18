@@ -178,9 +178,17 @@ extension URLRequest {
     /// On Darwin, URLSession hands a URLProtocol the request with `httpBody` set to nil
     /// and the body in `httpBodyStream`. Matching (`.body`) and recording (`postData`)
     /// read `httpBody`, so the protocols read the stream back before using the request.
-    /// If the stream fails, the request is returned unchanged.
-    func withBodyReadFromStream() -> URLRequest {
+    ///
+    /// The body must be read in full from a stream that has not been opened.
+    /// If the stream was already opened or closed, or a read fails,
+    /// this method throws `URLError(.requestBodyStreamExhausted)`
+    /// rather than return a request with a partial or empty body.
+    /// For a read failure, the error's underlying error is the stream's error, if any.
+    func withBodyReadFromStream() throws -> URLRequest {
         guard httpBody == nil, let stream = httpBodyStream else { return self }
+        guard stream.streamStatus == .notOpen else {
+            throw URLError(.requestBodyStreamExhausted)
+        }
 
         stream.open()
         defer { stream.close() }
@@ -191,7 +199,13 @@ extension URLRequest {
         while true {
             let count = stream.read(&buffer, maxLength: bufferSize)
             if count == 0 { break }
-            if count < 0 { return self }
+            if count < 0 {
+                var userInfo: [String: Any] = [:]
+                if let streamError = stream.streamError {
+                    userInfo[NSUnderlyingErrorKey] = streamError
+                }
+                throw URLError(.requestBodyStreamExhausted, userInfo: userInfo)
+            }
             body.append(buffer, count: count)
         }
 
@@ -230,8 +244,16 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     public override func startLoading() {
-        let mutableRequest =
-            (request.withBodyReadFromStream() as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        // Read the body back from its stream so matching and recording see it.
+        let bodyRequest: URLRequest
+        do {
+            bodyRequest = try request.withBodyReadFromStream()
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+
+        let mutableRequest = (bodyRequest as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
         let markedRequest = mutableRequest as URLRequest
 

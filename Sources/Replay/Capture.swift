@@ -140,7 +140,13 @@ public final class CaptureURLProtocol: URLProtocol {
         startTime = Date()
 
         // Read the body back from its stream so the recorded entry keeps it.
-        let bodyRequest = request.withBodyReadFromStream()
+        let bodyRequest: URLRequest
+        do {
+            bodyRequest = try request.withBodyReadFromStream()
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
 
         // Mark request as handled
         let mutableRequest = (bodyRequest as NSURLRequest).mutableCopy() as! NSMutableURLRequest
