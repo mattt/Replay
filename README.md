@@ -384,6 +384,15 @@ all must match for an entry to be selected.
 | `.body`         | Request body bytes                                   |
 | `.custom(…)`    | Custom `(URLRequest, URLRequest) -> Bool`            |
 
+URLSession can give a request body to Replay as a stream.
+Replay reads that stream into memory only when it needs the body:
+when a `.body` or `.custom` matcher runs, or when Replay records the request.
+Otherwise the request goes to the network with its stream.
+Replay reads at most 10 MiB of a request body;
+a larger body fails the request with `URLError(.dataLengthExceedsMaximum)`.
+To change the limit, set `maximumRequestBodySize`
+on `PlaybackConfiguration` or `CaptureConfiguration`.
+
 > [!TIP]
 > If built-in matchers don't cover your needs,
 > use `.custom` to implement arbitrary matching logic.
