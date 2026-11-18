@@ -94,7 +94,7 @@ jobs:
 
   test-linux:
     name: Swift ${{ matrix.swift-version }} on Linux${{ matrix.variant == 'async_http_client' && ' (AsyncHTTPClient)' || '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
