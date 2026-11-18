@@ -987,3 +987,41 @@ private func makeTestEntryFor(url: URL, status: Int, body: String) -> HAR.Entry 
         timings: HAR.Timings(send: 10, wait: 80, receive: 10)
     )
 }
+
+// MARK: - Request Bodies
+
+// URLSession hands URLProtocol a request whose body is in httpBodyStream on Darwin.
+// Playback.session routes through an HTTP header that FoundationNetworking does not pass to
+// URLProtocol, so this runs on Darwin only (where the stream behavior lives anyway).
+#if !canImport(FoundationNetworking)
+    @Test("body matcher sees the body of a URLSession request")
+    func bodyMatcherSeesStreamedBody() async throws {
+        func entry(body: String, answer: String) throws -> HAR.Entry {
+            var request = URLRequest(url: URL(string: "https://example.com/form")!)
+            request.httpMethod = "POST"
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data(body.utf8)
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/plain"])!
+            return try HAR.Entry(
+                request: request, response: response, data: Data(answer.utf8),
+                startTime: Date(), duration: 0.01)
+        }
+
+        let session = try await Playback.session(
+            configuration: PlaybackConfiguration(
+                source: .entries([try entry(body: "a=1", answer: "1"), try entry(body: "a=2", answer: "2")]),
+                matchers: [.method, .url, .body]
+            )
+        )
+
+        var request = URLRequest(url: URL(string: "https://example.com/form")!)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("a=2".utf8)
+
+        let (data, _) = try await session.data(for: request)
+        #expect(String(decoding: data, as: UTF8.self) == "2")
+    }
+#endif

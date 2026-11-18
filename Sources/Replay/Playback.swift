@@ -172,6 +172,35 @@ struct UnsafeSendable<T>: @unchecked Sendable {
     let value: T
 }
 
+extension URLRequest {
+    /// Returns a copy whose body is in `httpBody`, read from `httpBodyStream` if needed.
+    ///
+    /// On Darwin, URLSession hands a URLProtocol the request with `httpBody` set to nil
+    /// and the body in `httpBodyStream`. Matching (`.body`) and recording (`postData`)
+    /// read `httpBody`, so the protocols read the stream back before using the request.
+    /// If the stream fails, the request is returned unchanged.
+    func withBodyReadFromStream() -> URLRequest {
+        guard httpBody == nil, let stream = httpBodyStream else { return self }
+
+        stream.open()
+        defer { stream.close() }
+
+        var body = Data()
+        let bufferSize = 64 * 1024
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        while true {
+            let count = stream.read(&buffer, maxLength: bufferSize)
+            if count == 0 { break }
+            if count < 0 { return self }
+            body.append(buffer, count: count)
+        }
+
+        var copy = self
+        copy.httpBody = body  // Also clears `httpBodyStream`.
+        return copy
+    }
+}
+
 private func requestDescription(_ request: URLRequest) -> String {
     let method = request.httpMethod ?? "GET"
     let url = request.url?.absoluteString ?? "<unknown URL>"
@@ -201,7 +230,8 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     public override func startLoading() {
-        let mutableRequest = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        let mutableRequest =
+            (request.withBodyReadFromStream() as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
         let markedRequest = mutableRequest as URLRequest
 

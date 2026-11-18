@@ -139,8 +139,11 @@ public final class CaptureURLProtocol: URLProtocol {
     public override func startLoading() {
         startTime = Date()
 
+        // Read the body back from its stream so the recorded entry keeps it.
+        let bodyRequest = request.withBodyReadFromStream()
+
         // Mark request as handled
-        let mutableRequest = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        let mutableRequest = (bodyRequest as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
         let session = URLSession.shared
@@ -174,7 +177,7 @@ public final class CaptureURLProtocol: URLProtocol {
             self.client?.urlProtocolDidFinishLoading(self)
 
             // Record the entry asynchronously
-            let capturedRequest = self.request
+            let capturedRequest = bodyRequest
             Task { @Sendable in
                 await CaptureStore.shared.recordEntry(
                     request: capturedRequest,
