@@ -72,6 +72,13 @@ public enum Replay {
         }
     }
 
+    /// The default largest request body, in bytes, that Replay reads from a request's body stream:
+    /// 10 MiB.
+    ///
+    /// See `PlaybackConfiguration.maximumRequestBodySize`
+    /// and `CaptureConfiguration.maximumRequestBodySize`.
+    public static let defaultMaximumRequestBodySize = 10 * 1024 * 1024
+
     /// A pre-configured `URLSession` with Replay enabled.
     ///
     /// This is a convenience for tests and tools that want a session without
