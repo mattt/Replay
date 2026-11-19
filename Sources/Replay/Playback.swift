@@ -120,6 +120,8 @@ public struct PlaybackConfiguration: Sendable {
     ///     Built-in query filters also apply during URL and query matching.
     ///   - maximumRequestBodySize: The largest request body, in bytes,
     ///     that playback reads from a request's body stream.
+    ///     The value must be zero or more.
+    ///     Pass `Int.max` to read bodies of any size.
     public init(
         source: Source,
         playbackMode: Replay.PlaybackMode = .strict,
@@ -128,6 +130,7 @@ public struct PlaybackConfiguration: Sendable {
         filters: [Filter] = [],
         maximumRequestBodySize: Int = Replay.defaultMaximumRequestBodySize
     ) {
+        precondition(maximumRequestBodySize >= 0, "maximumRequestBodySize must be zero or more")
         self.source = source
         self.playbackMode = playbackMode
         self.recordMode = recordMode
@@ -203,7 +206,7 @@ extension URLRequest {
     /// For a read failure, the error's underlying error is the stream's error, if any.
     ///
     /// - Parameters:
-    ///   - limit: The maximum number of body bytes to read.
+    ///   - limit: The maximum number of body bytes to read. It must be zero or more.
     ///     If the stream has more bytes, this method throws `URLError(.dataLengthExceedsMaximum)`.
     ///   - isCancelled: Called before each read.
     ///     If it returns `true`, this method closes the stream and throws `CancellationError`.
@@ -211,6 +214,7 @@ extension URLRequest {
         limit: Int,
         isCancelled: () -> Bool = { false }
     ) throws -> URLRequest {
+        precondition(limit >= 0, "limit must be zero or more")
         guard httpBody == nil, let stream = httpBodyStream else { return self }
         guard stream.streamStatus == .notOpen else {
             throw URLError(.requestBodyStreamExhausted)

@@ -110,12 +110,15 @@ public struct CaptureConfiguration: Sendable {
     ///   - matchers: Matchers used to decide which requests are captured.
     ///   - maximumRequestBodySize: The largest request body, in bytes,
     ///     that capture reads from a request's body stream.
+    ///     The value must be zero or more.
+    ///     Pass `Int.max` to read bodies of any size.
     public init(
         destination: Destination,
         filters: [Filter] = [],
         matchers: [Matcher]? = nil,
         maximumRequestBodySize: Int = Replay.defaultMaximumRequestBodySize
     ) {
+        precondition(maximumRequestBodySize >= 0, "maximumRequestBodySize must be zero or more")
         self.destination = destination
         self.filters = filters
         self.matchers = matchers
