@@ -226,7 +226,10 @@ extension URLRequest {
             if isCancelled() { throw CancellationError() }
             // Read at most one byte past the limit, so an oversized body is detected
             // without reading the rest of it.
-            let maxLength = Swift.min(bufferSize, Swift.max(limit - body.count, 0) + 1)
+            // `body.count` never exceeds `limit` here, so `remaining` is not negative,
+            // and `+ 1` runs only when it cannot overflow.
+            let remaining = limit - body.count
+            let maxLength = remaining < bufferSize ? remaining + 1 : bufferSize
             let count = stream.read(&buffer, maxLength: maxLength)
             if count == 0 { break }
             if count < 0 {

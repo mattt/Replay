@@ -1148,6 +1148,38 @@ private func makeTestEntryFor(url: URL, status: Int, body: String) -> HAR.Entry 
         }
     }
 
+    @Test("playback reads a whole body when the size limit is Int.max")
+    func playbackReadsBodyWithMaximumLimit() async throws {
+        let url = URL(string: "https://example.com/upload")!
+        let body = Data(String(repeating: "A", count: 100_000).utf8)
+        var recordedRequest = URLRequest(url: url)
+        recordedRequest.httpMethod = "POST"
+        recordedRequest.httpBody = body
+        let response = HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        let entry = try HAR.Entry(
+            request: recordedRequest, response: response, data: Data("ok".utf8),
+            startTime: Date(), duration: 0)
+
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: InputStream(data: body),
+            configuration: PlaybackConfiguration(
+                source: .entries([entry]),
+                matchers: [.method, .url, .body],
+                maximumRequestBodySize: .max
+            )
+        )
+        defer { unregister() }
+
+        let outcome = await load(request)
+
+        guard case .finished = outcome else {
+            Issue.record("Expected the request to finish, but it failed: \(outcome)")
+            return
+        }
+    }
+
     @Test("stopping a playback load stops reading a slow body stream")
     func stopLoadingStopsSlowBodyRead() async throws {
         let url = URL(string: "https://example.com/upload")!
