@@ -48,11 +48,26 @@ public enum Matcher: Sendable {
     case headers([String])
 
     /// Matches the raw HTTP body bytes (`URLRequest.httpBody`).
+    ///
+    /// When URLSession gives the body to Replay as a stream,
+    /// Replay reads the stream into memory before matching,
+    /// up to `PlaybackConfiguration.maximumRequestBodySize`.
     case body
 
     /// Escape hatch for custom matching logic.
     /// Compares an incoming request against a candidate request (typically from a recorded entry).
     case custom(@Sendable (_ request: URLRequest, _ candidate: URLRequest) -> Bool)
+
+    /// Whether this matcher can read the request body.
+    ///
+    /// Replay reads a streamed request body into memory only for matchers that can read it.
+    /// A custom matcher can read any part of the request, so it counts.
+    var inspectsBody: Bool {
+        switch self {
+        case .body, .custom: return true
+        default: return false
+        }
+    }
 
     func test(_ request: URLRequest, _ candidate: URLRequest) -> Bool {
         switch self {

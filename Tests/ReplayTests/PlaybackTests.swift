@@ -1061,29 +1061,19 @@ private func makeTestEntryFor(url: URL, status: Int, body: String) -> HAR.Entry 
     func playbackFailsUnreadableBodyStream(_ kind: UnreadableBodyStream) async throws {
         let url = URL(string: "https://example.com/upload")!
 
-        // Match on the URL only, so a request with a lost body would still get a response.
-        let store = PlaybackStore()
-        try await store.configure(
-            PlaybackConfiguration(
+        // A custom matcher makes playback read the body, but matches any request,
+        // so a request with a lost body would still get a response.
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: kind.makeStream(),
+            configuration: PlaybackConfiguration(
                 source: .entries([makeTestEntryFor(url: url, status: 200, body: "ok")]),
-                matchers: [.url]
+                matchers: [.url, .custom({ _, _ in true })]
             )
         )
-        let key = PlaybackStoreRegistry.shared.register(store)
-        defer { PlaybackStoreRegistry.shared.unregister(key: key) }
+        defer { unregister() }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue(key, forHTTPHeaderField: ReplayProtocolContext.headerName)
-        request.httpBodyStream = kind.makeStream()
-
-        let client = LoadOutcomeClient()
-        let urlProtocol = PlaybackURLProtocol(request: request, cachedResponse: nil, client: client)
-        let outcome = await withCheckedContinuation { continuation in
-            client.continuation = continuation
-            urlProtocol.startLoading()
-        }
-        urlProtocol.stopLoading()
+        let outcome = await load(request)
 
         guard case .failed(let error) = outcome else {
             Issue.record("Expected the request to fail, but it finished loading")
@@ -1094,6 +1084,197 @@ private func makeTestEntryFor(url: URL, status: Int, body: String) -> HAR.Entry 
         if kind == .failsAfterFirstByte {
             let underlying = try #require(urlError.userInfo[NSUnderlyingErrorKey] as? NSError)
             #expect(underlying.domain == FailingInputStream.errorDomain)
+        }
+    }
+
+    @Test("playback keeps the body stream of a request whose body it does not need")
+    func playbackKeepsUnneededBodyStream() async throws {
+        let url = URL(string: "https://example.com/upload")!
+        let stream = CountingInputStream(byteCount: 16)
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: stream,
+            configuration: PlaybackConfiguration(
+                source: .entries([makeTestEntryFor(url: url, status: 200, body: "ok")]),
+                matchers: [.url]
+            )
+        )
+        defer { unregister() }
+
+        let outcome = await load(request)
+
+        guard case .finished = outcome else {
+            Issue.record("Expected the request to finish, but it failed: \(outcome)")
+            return
+        }
+        #expect(stream.streamStatus == .notOpen)
+        #expect(stream.readCount == 0)
+    }
+
+    @Test("playback fails a request whose body is over the size limit", arguments: [4, 5])
+    func playbackEnforcesBodySizeLimit(_ bodySize: Int) async throws {
+        let url = URL(string: "https://example.com/upload")!
+        let body = String(repeating: "A", count: bodySize)
+        var recordedRequest = URLRequest(url: url)
+        recordedRequest.httpMethod = "POST"
+        recordedRequest.httpBody = Data(body.utf8)
+        let response = HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        let entry = try HAR.Entry(
+            request: recordedRequest, response: response, data: Data("ok".utf8),
+            startTime: Date(), duration: 0)
+
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: InputStream(data: Data(body.utf8)),
+            configuration: PlaybackConfiguration(
+                source: .entries([entry]),
+                matchers: [.method, .url, .body],
+                maximumRequestBodySize: 4
+            )
+        )
+        defer { unregister() }
+
+        let outcome = await load(request)
+
+        switch (bodySize, outcome) {
+        case (4, .finished):
+            break
+        case (5, .failed(let error)):
+            let urlError = try #require(error as? URLError)
+            #expect(urlError.code == .dataLengthExceedsMaximum)
+        default:
+            Issue.record("Unexpected outcome for a \(bodySize)-byte body: \(outcome)")
+        }
+    }
+
+    @Test("playback reads a whole body when the size limit is Int.max")
+    func playbackReadsBodyWithMaximumLimit() async throws {
+        let url = URL(string: "https://example.com/upload")!
+        let body = Data(String(repeating: "A", count: 100_000).utf8)
+        var recordedRequest = URLRequest(url: url)
+        recordedRequest.httpMethod = "POST"
+        recordedRequest.httpBody = body
+        let response = HTTPURLResponse(
+            url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: [:])!
+        let entry = try HAR.Entry(
+            request: recordedRequest, response: response, data: Data("ok".utf8),
+            startTime: Date(), duration: 0)
+
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: InputStream(data: body),
+            configuration: PlaybackConfiguration(
+                source: .entries([entry]),
+                matchers: [.method, .url, .body],
+                maximumRequestBodySize: .max
+            )
+        )
+        defer { unregister() }
+
+        let outcome = await load(request)
+
+        guard case .finished = outcome else {
+            Issue.record("Expected the request to finish, but it failed: \(outcome)")
+            return
+        }
+    }
+
+    @Test("stopping a playback load stops reading a slow body stream")
+    func stopLoadingStopsSlowBodyRead() async throws {
+        let url = URL(string: "https://example.com/upload")!
+        // One byte every 5 ms: reading the whole stream takes about 2 seconds.
+        let stream = CountingInputStream(byteCount: 400, delay: 0.005)
+        let (request, unregister) = try await makeStreamedRequest(
+            url: url,
+            stream: stream,
+            configuration: PlaybackConfiguration(
+                source: .entries([makeTestEntryFor(url: url, status: 200, body: "ok")]),
+                matchers: [.method, .url, .body]
+            )
+        )
+        defer { unregister() }
+
+        let client = LoadOutcomeClient()
+        let urlProtocol = PlaybackURLProtocol(request: request, cachedResponse: nil, client: client)
+        urlProtocol.startLoading()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        urlProtocol.stopLoading()
+
+        // Give the read loop time to see the cancellation, then check that it stopped.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let countAfterStop = stream.readCount
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(stream.readCount == countAfterStop)
+        #expect(countAfterStop < 400)
+        #expect(stream.streamStatus == .closed)
+    }
+
+    /// Returns a POST request with a body stream, routed to a store with the configuration.
+    ///
+    /// Call the returned closure to unregister the store.
+    private func makeStreamedRequest(
+        url: URL,
+        stream: InputStream,
+        configuration: PlaybackConfiguration
+    ) async throws -> (URLRequest, @Sendable () -> Void) {
+        let store = PlaybackStore()
+        try await store.configure(configuration)
+        let key = PlaybackStoreRegistry.shared.register(store)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(key, forHTTPHeaderField: ReplayProtocolContext.headerName)
+        request.httpBodyStream = stream
+        return (request, { PlaybackStoreRegistry.shared.unregister(key: key) })
+    }
+
+    /// Loads the request with a playback URL protocol and returns how the load ended.
+    private func load(_ request: URLRequest) async -> LoadOutcome {
+        let client = LoadOutcomeClient()
+        let urlProtocol = PlaybackURLProtocol(request: request, cachedResponse: nil, client: client)
+        let outcome = await withCheckedContinuation { continuation in
+            client.continuation = continuation
+            urlProtocol.startLoading()
+        }
+        urlProtocol.stopLoading()
+        return outcome
+    }
+
+    /// An input stream that returns one byte per read and counts the reads.
+    private final class CountingInputStream: InputStream, @unchecked Sendable {
+        private let lock = NSLock()
+        private let byteCount: Int
+        private let delay: TimeInterval
+        private var status: Stream.Status = .notOpen
+        private var _readCount = 0
+
+        var readCount: Int { lock.withLock { _readCount } }
+
+        init(byteCount: Int, delay: TimeInterval = 0) {
+            self.byteCount = byteCount
+            self.delay = delay
+            super.init(data: Data())
+        }
+
+        override func open() { lock.withLock { status = .open } }
+        override func close() { lock.withLock { status = .closed } }
+        override var streamStatus: Stream.Status { lock.withLock { status } }
+        override var hasBytesAvailable: Bool { streamStatus == .open && readCount < byteCount }
+        override var streamError: Error? { nil }
+
+        override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength len: Int) -> Int {
+            if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+            return lock.withLock {
+                guard status == .open else { return -1 }
+                guard _readCount < byteCount else {
+                    status = .atEnd
+                    return 0
+                }
+                _readCount += 1
+                buffer[0] = UInt8(ascii: "A")
+                return 1
+            }
         }
     }
 

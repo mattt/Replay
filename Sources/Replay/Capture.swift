@@ -75,6 +75,16 @@ public struct CaptureConfiguration: Sendable {
     /// all requests are eligible for capture.
     public let matchers: [Matcher]?  // Optional: only capture matching requests
 
+    /// The largest request body, in bytes, that capture reads from a request's body stream.
+    ///
+    /// URLSession can give a request's body to the URL protocol as a stream.
+    /// Capture reads that stream into memory to record the body,
+    /// then sends the request with the body it read.
+    /// If the body is larger than this limit,
+    /// the request fails with `URLError(.dataLengthExceedsMaximum)`.
+    /// The default is `Replay.defaultMaximumRequestBodySize` (10 MiB).
+    public let maximumRequestBodySize: Int
+
     /// A destination for captured HAR entries.
     public enum Destination: Sendable {
         /// Writes a HAR log to the specified file URL.
@@ -98,14 +108,21 @@ public struct CaptureConfiguration: Sendable {
     ///   - destination: Where captured entries are written.
     ///   - filters: Filters applied to each entry before it is stored.
     ///   - matchers: Matchers used to decide which requests are captured.
+    ///   - maximumRequestBodySize: The largest request body, in bytes,
+    ///     that capture reads from a request's body stream.
+    ///     The value must be zero or more.
+    ///     Pass `Int.max` to read bodies of any size.
     public init(
         destination: Destination,
         filters: [Filter] = [],
-        matchers: [Matcher]? = nil
+        matchers: [Matcher]? = nil,
+        maximumRequestBodySize: Int = Replay.defaultMaximumRequestBodySize
     ) {
+        precondition(maximumRequestBodySize >= 0, "maximumRequestBodySize must be zero or more")
         self.destination = destination
         self.filters = filters
         self.matchers = matchers
+        self.maximumRequestBodySize = maximumRequestBodySize
     }
 }
 
@@ -118,8 +135,10 @@ public struct CaptureConfiguration: Sendable {
 public final class CaptureURLProtocol: URLProtocol {
     private static let handledKey = "ReplayCaptureHandled"
 
-    private var startTime: Date?
+    private let lock = NSLock()
+    private var loadTask: Task<Void, Never>?
     private var dataTask: URLSessionDataTask?
+    private var isStopped = false
 
     public override class func canInit(with request: URLRequest) -> Bool {
         // Prevent infinite loops
@@ -137,17 +156,32 @@ public final class CaptureURLProtocol: URLProtocol {
     }
 
     public override func startLoading() {
-        startTime = Date()
+        let startTime = Date()
+        let request = self.request
 
         // Read the body back from its stream so the recorded entry keeps it.
-        let bodyRequest: URLRequest
-        do {
-            bodyRequest = try request.withBodyReadFromStream()
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-            return
+        // The read runs in a task so that `stopLoading()` can cancel it.
+        let sendableSelf = UnsafeSendable(value: self)
+        let task = Task {
+            let urlProtocol = sendableSelf.value
+            let limit =
+                await CaptureStore.shared.currentConfiguration?.maximumRequestBodySize
+                ?? Replay.defaultMaximumRequestBodySize
+            let bodyRequest: URLRequest
+            do {
+                bodyRequest = try request.withBodyReadFromStream(limit: limit) { Task.isCancelled }
+            } catch {
+                if !Task.isCancelled {
+                    urlProtocol.client?.urlProtocol(urlProtocol, didFailWithError: error)
+                }
+                return
+            }
+            urlProtocol.send(bodyRequest, startTime: startTime)
         }
+        lock.withLock { loadTask = task }
+    }
 
+    private func send(_ bodyRequest: URLRequest, startTime: Date) {
         // Mark request as handled
         let mutableRequest = (bodyRequest as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
@@ -156,7 +190,7 @@ public final class CaptureURLProtocol: URLProtocol {
         // URLSession completion handlers are strictly @Sendable in Swift 6.
         // We use a wrapper to capture `weak self` safely without requiring Sendable conformance on Linux.
         let weakSelf = UnsafeWeakSendable(self)
-        dataTask = session.dataTask(with: mutableRequest as URLRequest) {
+        let task = session.dataTask(with: mutableRequest as URLRequest) {
             data, response, error in
             guard let self = weakSelf.value else { return }
 
@@ -167,8 +201,7 @@ public final class CaptureURLProtocol: URLProtocol {
 
             guard
                 let httpResponse = response as? HTTPURLResponse,
-                let data,
-                let startTime = self.startTime
+                let data
             else {
                 self.client?.urlProtocol(self, didFailWithError: ReplayError.invalidResponse)
                 return
@@ -195,13 +228,23 @@ public final class CaptureURLProtocol: URLProtocol {
             }
         }
 
-        dataTask?.resume()
+        // `stopLoading()` can run while the body is read; do not start a stopped load.
+        let started = lock.withLock {
+            guard !isStopped else { return false }
+            dataTask = task
+            return true
+        }
+        if started { task.resume() }
     }
 
     public override func stopLoading() {
+        let (loadTask, dataTask) = lock.withLock {
+            isStopped = true
+            return (self.loadTask, self.dataTask)
+        }
+        loadTask?.cancel()
         dataTask?.cancel()
     }
-
 }
 
 // Satisfy Sendable requirements for CaptureURLProtocol depending on platform.

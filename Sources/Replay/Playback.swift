@@ -82,6 +82,19 @@ public struct PlaybackConfiguration: Sendable {
     /// Built-in query filters also normalize URLs for `.url` and `.query` playback matching.
     public let filters: [Filter]
 
+    /// The largest request body, in bytes, that playback reads from a request's body stream.
+    ///
+    /// URLSession can give a request's body to the URL protocol as a stream.
+    /// Playback reads that stream into memory only when it needs the body:
+    /// when a matcher inspects the body (`.body` or `.custom`) and the playback mode is not `.live`,
+    /// or when recording is enabled.
+    /// Otherwise the request goes to the network with its stream.
+    ///
+    /// If playback needs a body that is larger than this limit,
+    /// the request fails with `URLError(.dataLengthExceedsMaximum)`.
+    /// The default is `Replay.defaultMaximumRequestBodySize` (10 MiB).
+    public let maximumRequestBodySize: Int
+
     /// A source of recorded traffic for playback.
     public enum Source: Sendable {
         /// Loads entries from a HAR file.
@@ -105,18 +118,25 @@ public struct PlaybackConfiguration: Sendable {
     ///   - matchers: Matchers used to match incoming requests to entries.
     ///   - filters: Filters applied to newly recorded entries.
     ///     Built-in query filters also apply during URL and query matching.
+    ///   - maximumRequestBodySize: The largest request body, in bytes,
+    ///     that playback reads from a request's body stream.
+    ///     The value must be zero or more.
+    ///     Pass `Int.max` to read bodies of any size.
     public init(
         source: Source,
         playbackMode: Replay.PlaybackMode = .strict,
         recordMode: Replay.RecordMode = .none,
         matchers: [Matcher] = .default,
-        filters: [Filter] = []
+        filters: [Filter] = [],
+        maximumRequestBodySize: Int = Replay.defaultMaximumRequestBodySize
     ) {
+        precondition(maximumRequestBodySize >= 0, "maximumRequestBodySize must be zero or more")
         self.source = source
         self.playbackMode = playbackMode
         self.recordMode = recordMode
         self.matchers = matchers
         self.filters = filters
+        self.maximumRequestBodySize = maximumRequestBodySize
     }
 }
 
@@ -176,15 +196,25 @@ extension URLRequest {
     /// Returns a copy whose body is in `httpBody`, read from `httpBodyStream` if needed.
     ///
     /// On Darwin, URLSession hands a URLProtocol the request with `httpBody` set to nil
-    /// and the body in `httpBodyStream`. Matching (`.body`) and recording (`postData`)
-    /// read `httpBody`, so the protocols read the stream back before using the request.
+    /// and the body in `httpBodyStream`. Matching (`.body` and `.custom`) and recording (`postData`)
+    /// read `httpBody`, so the protocols read the stream back when they need the body.
     ///
     /// The body must be read in full from a stream that has not been opened.
     /// If the stream was already opened or closed, or a read fails,
     /// this method throws `URLError(.requestBodyStreamExhausted)`
     /// rather than return a request with a partial or empty body.
     /// For a read failure, the error's underlying error is the stream's error, if any.
-    func withBodyReadFromStream() throws -> URLRequest {
+    ///
+    /// - Parameters:
+    ///   - limit: The maximum number of body bytes to read. It must be zero or more.
+    ///     If the stream has more bytes, this method throws `URLError(.dataLengthExceedsMaximum)`.
+    ///   - isCancelled: Called before each read.
+    ///     If it returns `true`, this method closes the stream and throws `CancellationError`.
+    func withBodyReadFromStream(
+        limit: Int,
+        isCancelled: () -> Bool = { false }
+    ) throws -> URLRequest {
+        precondition(limit >= 0, "limit must be zero or more")
         guard httpBody == nil, let stream = httpBodyStream else { return self }
         guard stream.streamStatus == .notOpen else {
             throw URLError(.requestBodyStreamExhausted)
@@ -197,7 +227,14 @@ extension URLRequest {
         let bufferSize = 64 * 1024
         var buffer = [UInt8](repeating: 0, count: bufferSize)
         while true {
-            let count = stream.read(&buffer, maxLength: bufferSize)
+            if isCancelled() { throw CancellationError() }
+            // Read at most one byte past the limit, so an oversized body is detected
+            // without reading the rest of it.
+            // `body.count` never exceeds `limit` here, so `remaining` is not negative,
+            // and `+ 1` runs only when it cannot overflow.
+            let remaining = limit - body.count
+            let maxLength = remaining < bufferSize ? remaining + 1 : bufferSize
+            let count = stream.read(&buffer, maxLength: maxLength)
             if count == 0 { break }
             if count < 0 {
                 var userInfo: [String: Any] = [:]
@@ -207,6 +244,16 @@ extension URLRequest {
                 throw URLError(.requestBodyStreamExhausted, userInfo: userInfo)
             }
             body.append(buffer, count: count)
+            if body.count > limit {
+                throw URLError(
+                    .dataLengthExceedsMaximum,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "The request body is larger than Replay's limit of \(limit) bytes. "
+                            + "Increase maximumRequestBodySize to match or record this request."
+                    ]
+                )
+            }
         }
 
         var copy = self
@@ -244,16 +291,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     public override func startLoading() {
-        // Read the body back from its stream so matching and recording see it.
-        let bodyRequest: URLRequest
-        do {
-            bodyRequest = try request.withBodyReadFromStream()
-        } catch {
-            client?.urlProtocol(self, didFailWithError: error)
-            return
-        }
-
-        let mutableRequest = (bodyRequest as NSURLRequest).mutableCopy() as! NSMutableURLRequest
+        let mutableRequest = (request as NSURLRequest).mutableCopy() as! NSMutableURLRequest
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
         let markedRequest = mutableRequest as URLRequest
 
@@ -276,6 +314,14 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     store = registered
                 } else {
                     store = PlaybackStore.shared
+                }
+
+                // Read the body back from its stream only if matching or recording uses it.
+                // Otherwise the request keeps its stream, and the network transport reads it.
+                if let limit = await store.requestBodyLimit() {
+                    matchingRequest = try matchingRequest.withBodyReadFromStream(limit: limit) {
+                        Task.isCancelled
+                    }
                 }
 
                 let disposition = try await store.checkRequest(matchingRequest)
@@ -665,6 +711,19 @@ public actor PlaybackStore {
             }
             recordingEnabled = false
         }
+    }
+
+    /// Returns the size limit for reading a request body from its stream,
+    /// or `nil` if neither matching nor recording uses the body.
+    ///
+    /// Matching uses the body when a matcher inspects it (`.body` or `.custom`)
+    /// and the playback mode is not `.live`. Recording always uses the body.
+    func requestBodyLimit() -> Int? {
+        guard let config = configuration else { return nil }
+        let matchingUsesBody =
+            effectivePlaybackMode != .live && config.matchers.contains { $0.inspectsBody }
+        guard recordingEnabled || matchingUsesBody else { return nil }
+        return config.maximumRequestBodySize
     }
 
     /// Expose entries for debugging/attachments.
