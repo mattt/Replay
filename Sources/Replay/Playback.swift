@@ -276,6 +276,9 @@ private func requestDescription(_ request: URLRequest) -> String {
 /// enabling support for Server-Sent Events and other streaming protocols.
 public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
     private static let handledKey = "ReplayPlaybackHandled"
+    // `startLoading()` and `stopLoading()` run on the client's thread,
+    // while the stream task stores the URLSession task from another thread.
+    private let lock = NSLock()
     private var streamTask: Task<Void, Never>?
     private var urlSessionTask: URLSessionTask?
 
@@ -297,7 +300,7 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
 
         // URLProtocol predates Swift concurrency; wrap self to cross isolation boundary
         let sendableSelf = UnsafeSendable(value: self)
-        streamTask = Task {
+        let task = Task {
             let urlProtocol = sendableSelf.value
             do {
                 var matchingRequest = markedRequest
@@ -366,11 +369,17 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                     let dataStream = delegate.dataStream
 
                     // Store task reference for cancellation
-                    urlProtocol.urlSessionTask = dataTask
+                    urlProtocol.setURLSessionTask(dataTask)
                     dataTask.resume()
 
-                    // Wait for response
-                    let httpResponse = try await delegate.waitForResponse()
+                    // Wait for response.
+                    // Cancel the transport if loading stops before the response arrives.
+                    let urlTask = dataTask
+                    let httpResponse = try await withTaskCancellationHandler {
+                        try await delegate.waitForResponse()
+                    } onCancel: {
+                        urlTask.cancel()
+                    }
 
                     urlProtocol.client?.urlProtocol(
                         urlProtocol, didReceive: httpResponse, cacheStoragePolicy: .notAllowed)
@@ -435,7 +444,6 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                         }
                     }
 
-                    let urlTask = dataTask
                     do {
                         try await withTaskCancellationHandler {
                             for try await chunk in dataStream {
@@ -482,13 +490,27 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
                 }
             }
         }
+        lock.lock()
+        streamTask = task
+        lock.unlock()
+    }
+
+    private func setURLSessionTask(_ task: URLSessionTask) {
+        lock.lock()
+        urlSessionTask = task
+        lock.unlock()
     }
 
     public override func stopLoading() {
+        lock.lock()
+        let urlSessionTask = self.urlSessionTask
+        let streamTask = self.streamTask
+        self.urlSessionTask = nil
+        self.streamTask = nil
+        lock.unlock()
+
         urlSessionTask?.cancel()
-        urlSessionTask = nil
         streamTask?.cancel()
-        streamTask = nil
     }
 }
 
@@ -496,24 +518,67 @@ public final class PlaybackURLProtocol: URLProtocol, @unchecked Sendable {
 
 /// A delegate that bridges URLSession callbacks to async streams for SSE support.
 final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    private var responseContinuation: CheckedContinuation<HTTPURLResponse, Error>?
-    private var dataContinuation: AsyncThrowingStream<Data, Error>.Continuation?
+    /// The response hand-off between URLSession's delegate queue and `waitForResponse()`.
+    /// URLSession can deliver the response, or fail, before the caller starts to wait.
+    private enum ResponseState {
+        case pending
+        case waiting(CheckedContinuation<HTTPURLResponse, Error>)
+        case ready(Result<HTTPURLResponse, Error>)
+        case delivered
+    }
+
+    private let lock = NSLock()
+    private var responseState = ResponseState.pending
+
+    // AsyncThrowingStream buffers chunks that arrive before iteration starts,
+    // and its continuation is safe to use from the delegate queue.
+    let dataStream: AsyncThrowingStream<Data, Error>
+    private let dataContinuation: AsyncThrowingStream<Data, Error>.Continuation
+
     // Held weakly because URLProtocol owns the streaming task that owns this delegate.
     weak var urlProtocol: PlaybackURLProtocol?
 
-    var dataStream: AsyncThrowingStream<Data, Error> {
-        if let stream = _dataStream { return stream }
-        let stream = AsyncThrowingStream<Data, Error> { continuation in
-            self.dataContinuation = continuation
-        }
-        _dataStream = stream
-        return stream
+    override init() {
+        var continuation: AsyncThrowingStream<Data, Error>.Continuation!
+        dataStream = AsyncThrowingStream { continuation = $0 }
+        dataContinuation = continuation
+        super.init()
     }
-    private var _dataStream: AsyncThrowingStream<Data, Error>?
 
+    /// Returns the HTTP response for the task, whether it arrived before or after this call.
+    ///
+    /// Call this method at most once.
     func waitForResponse() async throws -> HTTPURLResponse {
         try await withCheckedThrowingContinuation { continuation in
-            self.responseContinuation = continuation
+            lock.lock()
+            switch responseState {
+            case .pending:
+                responseState = .waiting(continuation)
+                lock.unlock()
+            case .ready(let result):
+                responseState = .delivered
+                lock.unlock()
+                continuation.resume(with: result)
+            case .waiting, .delivered:
+                lock.unlock()
+                preconditionFailure("waitForResponse() must be called only once")
+            }
+        }
+    }
+
+    /// Settles the response with the first result; later results are ignored.
+    private func settleResponse(_ result: Result<HTTPURLResponse, Error>) {
+        lock.lock()
+        switch responseState {
+        case .pending:
+            responseState = .ready(result)
+            lock.unlock()
+        case .waiting(let continuation):
+            responseState = .delivered
+            lock.unlock()
+            continuation.resume(with: result)
+        case .ready, .delivered:
+            lock.unlock()
         }
     }
 
@@ -522,14 +587,13 @@ final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Send
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
         if let httpResponse = response as? HTTPURLResponse {
-            responseContinuation?.resume(returning: httpResponse)
-            responseContinuation = nil
+            settleResponse(.success(httpResponse))
         }
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        dataContinuation?.yield(data)
+        dataContinuation.yield(data)
     }
 
     // Connection-level challenges (TLS server trust, client certificates) arrive through
@@ -577,11 +641,12 @@ final class StreamingDelegate: NSObject, URLSessionDataDelegate, @unchecked Send
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error = error {
-            responseContinuation?.resume(throwing: error)
-            responseContinuation = nil
-            dataContinuation?.finish(throwing: error)
+            settleResponse(.failure(error))
+            dataContinuation.finish(throwing: error)
         } else {
-            dataContinuation?.finish()
+            // A task that completes without an HTTP response must not leave the caller waiting.
+            settleResponse(.failure(URLError(.badServerResponse)))
+            dataContinuation.finish()
         }
     }
 }
