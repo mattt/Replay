@@ -22,7 +22,9 @@ struct RecordingStreamErrorTests {
         defer { try? FileManager.default.removeItem(at: archive) }
         let session = try await Playback.session(
             configuration: .init(source: .file(archive), playbackMode: mode, recordMode: .once))
-        defer { session.invalidateAndCancel() }
+        // The request fails before teardown. Cancelling a finished task on Linux can make
+        // FoundationNetworking resume `data(for:)` a second time, which traps.
+        defer { session.finishTasksAndInvalidate() }
         let key = try #require(
             session.configuration.httpAdditionalHeaders?[ReplayProtocolContext.headerName] as? String)
         var request = URLRequest(url: server.url)
