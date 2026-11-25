@@ -261,6 +261,65 @@ struct PlaybackTests {
             #expect(await store.getAvailableEntries().isEmpty)
         }
 
+        @Test("Rewrite keeps the archive until the first recording and starts a fresh log")
+        func rewriteExistingArchive() async throws {
+            let archive = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".har")
+            defer { try? FileManager.default.removeItem(at: archive) }
+            var original = HAR.create(creator: "Previous recording")
+            original.entries = [makeTestEntry()]
+            let originalData = try HAR.encode(original)
+            try originalData.write(to: archive)
+            let reader = try FileHandle(forReadingFrom: archive)
+            defer { reader.closeFile() }
+
+            let store = PlaybackStore()
+            let configuration = PlaybackConfiguration(source: .file(archive), recordMode: .rewrite)
+            try await store.configure(configuration)
+            await store.flush()
+            #expect(try Data(contentsOf: archive) == originalData)
+
+            let url = try #require(URL(string: original.entries[0].request.url))
+            let request = URLRequest(url: url)
+            guard case .network(true) = try await store.checkRequest(request) else {
+                Issue.record("Expected to record a new response for the old URL")
+                return
+            }
+            let response = try #require(HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil, headerFields: nil))
+            try await store.recordResponse(
+                request: request, response: response, data: Data(), duration: 0, startTime: Date())
+            #expect(reader.readDataToEndOfFile() == originalData)
+            let first = try HAR.load(from: archive)
+            #expect(first.creator == HAR.create().creator)
+            #expect(first.entries.map(\.response.status) == [201])
+
+            let next = makeTestEntryFor(url: url, status: 202, body: "Accepted")
+            try await store.recordEntry(next)
+            #expect(try HAR.load(from: archive).entries.map(\.response.status) == [201, 202])
+
+            try await store.configure(configuration)
+            try await store.recordEntry(next)
+            #expect(try HAR.load(from: archive).entries.map(\.response.status) == [202])
+        }
+
+        @Test("A failed rewrite entry is excluded when the save is retried")
+        func rewriteAfterFailedSave() async throws {
+            let files = FileManager.default
+            let directory = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let archive = directory.appendingPathComponent("recording.har")
+            defer { try? files.removeItem(at: directory) }
+            let store = PlaybackStore()
+            try await store.configure(.init(source: .file(archive), recordMode: .rewrite))
+            // A directory at the archive path makes the first write fail.
+            try files.createDirectory(at: archive, withIntermediateDirectories: true)
+            let entry = makeTestEntry()
+            await #expect(throws: Error.self) { try await store.recordEntry(entry) }
+            #expect(await store.getAvailableEntries().isEmpty)
+
+            try files.removeItem(at: archive)
+            try await store.recordEntry(entry)
+            #expect(try HAR.load(from: archive).entries.count == 1)
+        }
+
         @Test("getAvailableEntries returns configured entries")
         func getAvailableEntries() async throws {
             let store = PlaybackStore()
