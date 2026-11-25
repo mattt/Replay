@@ -743,8 +743,10 @@ public actor PlaybackStore {
 
         switch config.source {
         case .file(let url):
-            if config.recordMode == .rewrite, FileManager.default.fileExists(atPath: url.path) {
-                try? FileManager.default.removeItem(at: url)
+            if config.recordMode == .rewrite {
+                entries = []
+                recordingEnabled = true
+                return
             }
             do {
                 let log = try HAR.load(from: url)
@@ -886,13 +888,7 @@ public actor PlaybackStore {
             entry = await filter.apply(to: entry)
         }
 
-        entries.append(entry)
-
-        if case .file(let url) = config.source {
-            var log = (try? HAR.load(from: url)) ?? HAR.create()
-            log.entries = entries
-            try HAR.save(log, to: url)
-        }
+        try append(entry, using: config)
     }
 
     /// Records a pre-built HAR entry.
@@ -903,13 +899,20 @@ public actor PlaybackStore {
     ///
     /// - Parameter entry: The entry to record.
     public func recordEntry(_ entry: HAR.Entry) throws {
-        entries.append(entry)
+        try append(entry, using: configuration)
+    }
 
-        if let config = configuration, case .file(let url) = config.source {
-            var log = (try? HAR.load(from: url)) ?? HAR.create()
-            log.entries = entries
-            try HAR.save(log, to: url)
+    private func append(_ entry: HAR.Entry, using config: PlaybackConfiguration?) throws {
+        guard let config, case .file(let url) = config.source else {
+            entries.append(entry)
+            return
         }
+
+        let startsRewrite = config.recordMode == .rewrite && entries.isEmpty
+        var log = startsRewrite ? HAR.create() : ((try? HAR.load(from: url)) ?? HAR.create())
+        log.entries = entries + [entry]
+        try HAR.save(log, to: url, options: startsRewrite ? .atomic : [])
+        entries = log.entries
     }
 
     /// Handles a URL request using the current playback configuration.

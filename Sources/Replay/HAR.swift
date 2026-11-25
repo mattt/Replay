@@ -786,6 +786,10 @@ extension HAR {
     /// Uses a default `JSONEncoder` configured to encode dates as ISO 8601
     /// with fractional seconds and pretty-printed output.
     public static func save(_ log: Log, to url: URL) throws {
+        try save(log, to: url, options: [])
+    }
+
+    static func save(_ log: Log, to url: URL, options: Data.WritingOptions) throws {
         let data = try encode(log)
 
         // Ensure the directory exists
@@ -794,7 +798,7 @@ extension HAR {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
 
-        try data.write(to: url)
+        try data.write(to: url, options: options)
     }
 
     /// Encode HAR log to data.
